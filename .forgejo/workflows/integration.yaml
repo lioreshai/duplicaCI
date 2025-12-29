@@ -1,14 +1,19 @@
 name: Integration Tests
 
 on:
-  workflow_dispatch:  # Manual trigger only - these tests hit real infrastructure
-  schedule:
-    # Run weekly on Sundays at 2:00 AM EST (07:00 UTC)
-    - cron: '0 7 * * 0'
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
 
 jobs:
   integration:
     runs-on: ubuntu-latest
+    services:
+      docker:
+        image: docker:dind
+        options: --privileged
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -19,15 +24,57 @@ jobs:
           go-version: '1.21'
           cache: false
 
-      - name: Install sshpass
-        run: sudo apt-get update && sudo apt-get install -y sshpass
+      - name: Set up Docker environment
+        run: |
+          # Wait for Docker daemon to be ready
+          sleep 5
+          docker info
+
+      - name: Create test Duplicacy environment
+        run: |
+          # Create test directories
+          mkdir -p /tmp/duplicacy-test/repo
+          mkdir -p /tmp/duplicacy-test/storage
+          mkdir -p /tmp/duplicacy-test/config
+
+          # Create some test files to backup
+          echo "test file 1" > /tmp/duplicacy-test/repo/file1.txt
+          echo "test file 2" > /tmp/duplicacy-test/repo/file2.txt
+          mkdir -p /tmp/duplicacy-test/repo/subdir
+          echo "test file 3" > /tmp/duplicacy-test/repo/subdir/file3.txt
+
+          # Pull Duplicacy image
+          docker pull saspus/duplicacy-web:mini
+
+          # Start Duplicacy container
+          docker run -d \
+            --name Duplicacy \
+            -v /tmp/duplicacy-test/repo:/repo \
+            -v /tmp/duplicacy-test/storage:/storage \
+            -v /tmp/duplicacy-test/config:/config \
+            saspus/duplicacy-web:mini
+
+          # Wait for container to start
+          sleep 3
+          docker ps
+
+          # Initialize a duplicacy repository inside the container
+          docker exec Duplicacy sh -c "cd /repo && duplicacy init test-repo /storage"
+
+          # Verify initialization
+          docker exec Duplicacy sh -c "cd /repo && duplicacy list"
 
       - name: Run integration tests
         env:
-          INTEGRATION_SSH_HOST: root@10.30.200.1
-          INTEGRATION_SSH_PASSWORD: ${{ secrets.MGMT_PASSWORD }}
           INTEGRATION_DOCKER_CONTAINER: Duplicacy
-          INTEGRATION_REPO_PATH: /mnt/mikrotik_backups
-          INTEGRATION_STORAGE: GenizaNAS
+          INTEGRATION_REPO_PATH: /repo
+          INTEGRATION_STORAGE: default
         run: |
           go test -tags=integration -v ./internal/executor/ -timeout 5m
+
+      - name: Cleanup
+        if: always()
+        run: |
+          docker stop Duplicacy || true
+          docker rm Duplicacy || true
+          rm -rf /tmp/duplicacy-test || true

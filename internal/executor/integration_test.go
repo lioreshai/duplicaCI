@@ -8,12 +8,17 @@ import (
 	"testing"
 )
 
-// Integration tests require:
-// - INTEGRATION_SSH_HOST: SSH host to test against (e.g., root@192.168.1.100)
-// - INTEGRATION_SSH_PASSWORD: SSH password
-// - INTEGRATION_DOCKER_CONTAINER: Docker container name (e.g., Duplicacy)
-// - INTEGRATION_REPO_PATH: Path to a Duplicacy repository inside the container
-// - INTEGRATION_STORAGE: Storage name to test with
+// Integration tests can run in two modes:
+//
+// 1. Local Docker mode (CI):
+//    - INTEGRATION_DOCKER_CONTAINER: Docker container name (e.g., Duplicacy)
+//    - INTEGRATION_REPO_PATH: Path to repository inside container
+//    - INTEGRATION_STORAGE: Storage name to test with
+//
+// 2. Remote SSH mode (optional):
+//    - INTEGRATION_SSH_HOST: SSH host (e.g., root@192.168.1.100)
+//    - INTEGRATION_SSH_PASSWORD: SSH password
+//    - Plus the Docker/repo/storage vars above
 //
 // Run with: go test -tags=integration -v ./internal/executor/
 
@@ -24,40 +29,19 @@ func getIntegrationConfig(t *testing.T) (host, password, container, repoPath, st
 	repoPath = os.Getenv("INTEGRATION_REPO_PATH")
 	storage = os.Getenv("INTEGRATION_STORAGE")
 
-	if host == "" || password == "" {
-		t.Skip("INTEGRATION_SSH_HOST and INTEGRATION_SSH_PASSWORD required")
+	// At minimum we need a container to test with
+	if container == "" {
+		t.Skip("INTEGRATION_DOCKER_CONTAINER required")
 	}
 
 	return
 }
 
-func TestIntegration_SSHConnection(t *testing.T) {
-	host, password, _, _, _ := getIntegrationConfig(t)
-
-	exec := New(Options{
-		SSHHost:     host,
-		SSHPassword: password,
-		Verbose:     true,
-	})
-
-	// Test a simple command via SSH
-	err := exec.execute("echo 'SSH connection successful'")
-	if err != nil {
-		t.Fatalf("SSH connection failed: %v", err)
-	}
-}
-
 func TestIntegration_DockerContainerExists(t *testing.T) {
-	host, password, container, _, _ := getIntegrationConfig(t)
-
-	if container == "" {
-		t.Skip("INTEGRATION_DOCKER_CONTAINER required")
-	}
+	_, _, container, _, _ := getIntegrationConfig(t)
 
 	exec := New(Options{
-		SSHHost:     host,
-		SSHPassword: password,
-		Verbose:     true,
+		Verbose: true,
 	})
 
 	// Verify container exists and is running
@@ -68,17 +52,10 @@ func TestIntegration_DockerContainerExists(t *testing.T) {
 }
 
 func TestIntegration_DuplicacyBinaryExists(t *testing.T) {
-	host, password, container, _, _ := getIntegrationConfig(t)
-
-	if container == "" {
-		t.Skip("INTEGRATION_DOCKER_CONTAINER required")
-	}
+	_, _, container, _, _ := getIntegrationConfig(t)
 
 	exec := New(Options{
-		SSHHost:         host,
-		SSHPassword:     password,
-		DockerContainer: container,
-		Verbose:         true,
+		Verbose: true,
 	})
 
 	// Verify duplicacy binary exists in container
@@ -89,46 +66,58 @@ func TestIntegration_DuplicacyBinaryExists(t *testing.T) {
 }
 
 func TestIntegration_DuplicacyList(t *testing.T) {
-	host, password, container, repoPath, storage := getIntegrationConfig(t)
+	_, _, container, repoPath, storage := getIntegrationConfig(t)
 
-	if container == "" || repoPath == "" || storage == "" {
-		t.Skip("INTEGRATION_DOCKER_CONTAINER, INTEGRATION_REPO_PATH, and INTEGRATION_STORAGE required")
+	if repoPath == "" || storage == "" {
+		t.Skip("INTEGRATION_REPO_PATH and INTEGRATION_STORAGE required")
 	}
 
 	exec := New(Options{
-		SSHHost:         host,
-		SSHPassword:     password,
 		DockerContainer: container,
 		Verbose:         true,
 	})
 
 	// Run duplicacy list - this is a read-only command
-	// We need to cd to the repository path first
-	cmd := exec.buildCommand([]string{"-d", repoPath, "list", "-storage", storage})
-	t.Logf("Running command: %s", cmd)
-
-	err := exec.execute(cmd)
+	err := exec.RunDuplicacy("-d", repoPath, "list", "-storage", storage)
 	if err != nil {
-		// List might fail if repo doesn't exist, log but don't fail
-		t.Logf("duplicacy list returned error (may be expected): %v", err)
+		t.Fatalf("duplicacy list failed: %v", err)
 	}
 }
 
-func TestIntegration_CommandBuilding(t *testing.T) {
-	host, password, container, _, _ := getIntegrationConfig(t)
+func TestIntegration_DuplicacyBackupAndList(t *testing.T) {
+	_, _, container, repoPath, storage := getIntegrationConfig(t)
 
-	if container == "" {
-		t.Skip("INTEGRATION_DOCKER_CONTAINER required")
+	if repoPath == "" || storage == "" {
+		t.Skip("INTEGRATION_REPO_PATH and INTEGRATION_STORAGE required")
 	}
 
 	exec := New(Options{
-		SSHHost:         host,
-		SSHPassword:     password,
 		DockerContainer: container,
 		Verbose:         true,
 	})
 
-	// Verify command is built correctly
+	// Run a backup
+	err := exec.RunDuplicacy("-d", repoPath, "backup", "-storage", storage)
+	if err != nil {
+		t.Fatalf("duplicacy backup failed: %v", err)
+	}
+
+	// Verify backup shows in list
+	err = exec.RunDuplicacy("-d", repoPath, "list", "-storage", storage)
+	if err != nil {
+		t.Fatalf("duplicacy list after backup failed: %v", err)
+	}
+}
+
+func TestIntegration_CommandBuilding_LocalDocker(t *testing.T) {
+	_, _, container, _, _ := getIntegrationConfig(t)
+
+	exec := New(Options{
+		DockerContainer: container,
+		Verbose:         true,
+	})
+
+	// Verify command is built correctly for local Docker
 	cmd := exec.buildCommand([]string{"list", "-storage", "test"})
 
 	// Should contain docker exec
@@ -139,6 +128,34 @@ func TestIntegration_CommandBuilding(t *testing.T) {
 	// Should contain duplicacy
 	if !strings.Contains(cmd, "duplicacy list -storage test") {
 		t.Errorf("command should contain duplicacy list, got: %s", cmd)
+	}
+
+	// Should NOT contain SSH (local mode)
+	if strings.Contains(cmd, "sshpass") || strings.Contains(cmd, "ssh ") {
+		t.Errorf("local mode should not contain SSH, got: %s", cmd)
+	}
+}
+
+func TestIntegration_CommandBuilding_RemoteSSH(t *testing.T) {
+	host, password, container, _, _ := getIntegrationConfig(t)
+
+	if host == "" || password == "" {
+		t.Skip("SSH tests require INTEGRATION_SSH_HOST and INTEGRATION_SSH_PASSWORD")
+	}
+
+	exec := New(Options{
+		SSHHost:         host,
+		SSHPassword:     password,
+		DockerContainer: container,
+		Verbose:         true,
+	})
+
+	// Verify command is built correctly for remote SSH
+	cmd := exec.buildCommand([]string{"list", "-storage", "test"})
+
+	// Should contain docker exec
+	if !strings.Contains(cmd, "docker exec "+container) {
+		t.Errorf("command should contain docker exec, got: %s", cmd)
 	}
 
 	// Should contain SSH wrapper
@@ -152,21 +169,15 @@ func TestIntegration_CommandBuilding(t *testing.T) {
 }
 
 func TestIntegration_DryRunDoesNotExecute(t *testing.T) {
-	host, password, container, _, _ := getIntegrationConfig(t)
-
-	if container == "" {
-		t.Skip("INTEGRATION_DOCKER_CONTAINER required")
-	}
+	_, _, container, _, _ := getIntegrationConfig(t)
 
 	exec := New(Options{
-		SSHHost:         host,
-		SSHPassword:     password,
 		DockerContainer: container,
 		DryRun:          true,
 		Verbose:         true,
 	})
 
-	// With dry run, this should not actually execute
+	// With dry run, this should not actually execute (nonexistent storage)
 	err := exec.RunDuplicacy("backup", "-storage", "nonexistent")
 	if err != nil {
 		t.Errorf("dry run should not return error: %v", err)
