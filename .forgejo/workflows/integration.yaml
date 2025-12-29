@@ -7,13 +7,12 @@ on:
     branches: [main]
   workflow_dispatch:
 
+env:
+  DUPLICACY_IMAGE: saspus/duplicacy-web:mini
+
 jobs:
   integration:
     runs-on: ubuntu-latest
-    services:
-      docker:
-        image: docker:dind
-        options: --privileged
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -24,13 +23,16 @@ jobs:
           go-version: '1.21'
           cache: false
 
-      - name: Set up Docker environment
+      - name: Set container name
+        id: container
         run: |
-          # Wait for Docker daemon to be ready
-          sleep 5
-          docker info
+          CONTAINER_NAME="duplicacy-test-${GITHUB_SHA::8}"
+          echo "name=${CONTAINER_NAME}" >> $GITHUB_OUTPUT
+          echo "Container name: ${CONTAINER_NAME}"
 
       - name: Create test Duplicacy environment
+        env:
+          CONTAINER_NAME: ${{ steps.container.outputs.name }}
         run: |
           # Create test directories
           mkdir -p /tmp/duplicacy-test/repo
@@ -44,29 +46,29 @@ jobs:
           echo "test file 3" > /tmp/duplicacy-test/repo/subdir/file3.txt
 
           # Pull Duplicacy image
-          docker pull saspus/duplicacy-web:mini
+          docker pull ${DUPLICACY_IMAGE}
 
-          # Start Duplicacy container
+          # Start Duplicacy container with unique name
           docker run -d \
-            --name Duplicacy \
+            --name ${CONTAINER_NAME} \
             -v /tmp/duplicacy-test/repo:/repo \
             -v /tmp/duplicacy-test/storage:/storage \
             -v /tmp/duplicacy-test/config:/config \
-            saspus/duplicacy-web:mini
+            ${DUPLICACY_IMAGE}
 
           # Wait for container to start
           sleep 3
           docker ps
 
           # Initialize a duplicacy repository inside the container
-          docker exec Duplicacy sh -c "cd /repo && duplicacy init test-repo /storage"
+          docker exec ${CONTAINER_NAME} sh -c "cd /repo && duplicacy init test-repo /storage"
 
           # Verify initialization
-          docker exec Duplicacy sh -c "cd /repo && duplicacy list"
+          docker exec ${CONTAINER_NAME} sh -c "cd /repo && duplicacy list"
 
       - name: Run integration tests
         env:
-          INTEGRATION_DOCKER_CONTAINER: Duplicacy
+          INTEGRATION_DOCKER_CONTAINER: ${{ steps.container.outputs.name }}
           INTEGRATION_REPO_PATH: /repo
           INTEGRATION_STORAGE: default
         run: |
@@ -74,15 +76,25 @@ jobs:
 
       - name: Cleanup
         if: always()
+        env:
+          CONTAINER_NAME: ${{ steps.container.outputs.name }}
         run: |
-          # Stop and remove container
-          docker stop Duplicacy 2>/dev/null || true
-          docker rm -v Duplicacy 2>/dev/null || true
+          # Stop and remove container with volumes
+          docker stop ${CONTAINER_NAME} 2>/dev/null || true
+          docker rm -v ${CONTAINER_NAME} 2>/dev/null || true
+
+          # Remove the pulled image
+          docker rmi ${DUPLICACY_IMAGE} 2>/dev/null || true
 
           # Remove all test data
           rm -rf /tmp/duplicacy-test
 
+          # Prune any dangling images/volumes
+          docker image prune -f 2>/dev/null || true
+          docker volume prune -f 2>/dev/null || true
+
           # Verify nothing remains
           echo "Verifying cleanup..."
           [ ! -d /tmp/duplicacy-test ] && echo "✓ Test directory removed"
-          ! docker ps -a --format '{{.Names}}' | grep -q Duplicacy && echo "✓ Container removed"
+          ! docker ps -a --format '{{.Names}}' | grep -q "${CONTAINER_NAME}" && echo "✓ Container removed"
+          ! docker images --format '{{.Repository}}:{{.Tag}}' | grep -q "${DUPLICACY_IMAGE}" && echo "✓ Image removed"
