@@ -31,36 +31,47 @@ jobs:
           DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
           LDFLAGS="-X main.version=${VERSION} -X main.commit=${COMMIT} -X main.date=${DATE}"
 
-          # Linux amd64
-          GOOS=linux GOARCH=amd64 go build -ldflags "${LDFLAGS}" -o duplicaci-linux-amd64 .
+          # Linux amd64 (primary target for CI/CD)
+          GOOS=linux GOARCH=amd64 go build -ldflags "${LDFLAGS}" -o duplicaci_linux_amd64 .
 
           # Linux arm64
-          GOOS=linux GOARCH=arm64 go build -ldflags "${LDFLAGS}" -o duplicaci-linux-arm64 .
-
-          # Darwin amd64
-          GOOS=darwin GOARCH=amd64 go build -ldflags "${LDFLAGS}" -o duplicaci-darwin-amd64 .
-
-          # Darwin arm64
-          GOOS=darwin GOARCH=arm64 go build -ldflags "${LDFLAGS}" -o duplicaci-darwin-arm64 .
-
-          # Windows amd64
-          GOOS=windows GOARCH=amd64 go build -ldflags "${LDFLAGS}" -o duplicaci-windows-amd64.exe .
+          GOOS=linux GOARCH=arm64 go build -ldflags "${LDFLAGS}" -o duplicaci_linux_arm64 .
 
       - name: Create checksums
         run: |
-          sha256sum duplicaci-* > checksums.txt
+          sha256sum duplicaci_* > checksums.txt
           cat checksums.txt
 
-      - name: Create Release
-        uses: softprops/action-gh-release@v1
-        with:
-          files: |
-            duplicaci-linux-amd64
-            duplicaci-linux-arm64
-            duplicaci-darwin-amd64
-            duplicaci-darwin-arm64
-            duplicaci-windows-amd64.exe
-            checksums.txt
-          generate_release_notes: true
+      - name: Create Release via Forgejo API
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION=${{ steps.version.outputs.VERSION }}
+
+          # Create release
+          RELEASE_RESPONSE=$(curl -s -X POST \
+            "https://git.shai.network/api/v1/repos/${GITHUB_REPOSITORY}/releases" \
+            -H "Authorization: token ${GITHUB_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d "{\"tag_name\": \"${VERSION}\", \"name\": \"${VERSION}\", \"body\": \"Release ${VERSION}\"}")
+
+          RELEASE_ID=$(echo "$RELEASE_RESPONSE" | jq -r '.id')
+          echo "Created release ID: $RELEASE_ID"
+
+          if [ "$RELEASE_ID" = "null" ] || [ -z "$RELEASE_ID" ]; then
+            echo "Failed to create release:"
+            echo "$RELEASE_RESPONSE"
+            exit 1
+          fi
+
+          # Upload binaries
+          for file in duplicaci_linux_amd64 duplicaci_linux_arm64 checksums.txt; do
+            echo "Uploading $file..."
+            curl -s -X POST \
+              "https://git.shai.network/api/v1/repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}/assets?name=${file}" \
+              -H "Authorization: token ${GITHUB_TOKEN}" \
+              -H "Content-Type: application/octet-stream" \
+              --data-binary @${file}
+          done
+
+          echo "Release ${VERSION} created successfully"
