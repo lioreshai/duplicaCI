@@ -21,6 +21,7 @@ type Options struct {
 	CacheDir         string            // Duplicacy Web GUI cache directory (e.g., /cache/localhost/0)
 	StoragePassword  string            // Default storage encryption password
 	StoragePasswords map[string]string // Per-storage passwords (storage name -> password)
+	GCDToken         string            // Google Drive token file path
 }
 
 // Executor runs duplicacy commands
@@ -173,6 +174,13 @@ func (e *Executor) buildCommandWithStorage(duplicacyBin string, args []string, s
 					exports += fmt.Sprintf(" && export DUPLICACY_%s_PASSWORD=\"%s\"", upperName, escapedPw)
 				}
 				shellCmd = exports + " && " + shellCmd
+			}
+
+			// Set GCD token path if provided (for Google Drive storages)
+			if e.opts.GCDToken != "" && storageName != "" {
+				upperName := strings.ToUpper(strings.ReplaceAll(storageName, "-", "_"))
+				tokenExport := fmt.Sprintf("export DUPLICACY_%s_GCD_TOKEN=\"%s\"", upperName, e.opts.GCDToken)
+				shellCmd = tokenExport + " && " + shellCmd
 			}
 
 			duplicacyCmd = fmt.Sprintf("docker exec %s sh -c '%s'", e.opts.DockerContainer, shellCmd)

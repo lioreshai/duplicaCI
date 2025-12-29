@@ -25,6 +25,7 @@ var (
 	sshHost         string
 	sshPassword     string
 	storagePassword string
+	gcdToken        string
 
 	// Notification flags
 	createIssues bool
@@ -57,6 +58,7 @@ func init() {
 	backupCmd.Flags().StringVar(&sshHost, "ssh-host", "", "SSH to host before running (user@host)")
 	backupCmd.Flags().StringVar(&sshPassword, "ssh-password", "", "SSH password (or SSH_PASSWORD env)")
 	backupCmd.Flags().StringVar(&storagePassword, "storage-password", "", "Duplicacy storage encryption password (or DUPLICACY_PASSWORD env)")
+	backupCmd.Flags().StringVar(&gcdToken, "gcd-token", "", "Google Drive token file path (for gcd:// storages)")
 
 	backupCmd.Flags().BoolVar(&createIssues, "create-issues", false, "Create Forgejo/GitHub issue on failure")
 	backupCmd.Flags().StringVar(&forgejoURL, "forgejo-url", "", "Forgejo server URL")
@@ -112,6 +114,7 @@ func runBackup(cmd *cobra.Command, args []string) error {
 		RepoPath:        repoPath,
 		CacheDir:        cacheDir,
 		StoragePassword: storagePassword,
+		GCDToken:        gcdToken,
 	})
 
 	var allErrors []string
