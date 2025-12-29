@@ -21,10 +21,10 @@ type Options struct {
 
 // Executor runs duplicacy commands
 type Executor struct {
-	opts            Options
-	discoveredPath  string
-	discoverOnce    sync.Once
-	discoverErr     error
+	opts           Options
+	discoveredPath string
+	discoverOnce   sync.Once
+	discoverErr    error
 }
 
 // New creates a new Executor
