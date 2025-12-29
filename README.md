@@ -27,10 +27,10 @@ duplicaci bridges the gap: use it for automated backups while keeping the Web GU
 
 ```bash
 # From source
-go install github.com/liore/duplicaci@latest
+go install github.com/lioreshai/duplicaci@latest
 
 # Or build locally
-git clone https://git.shai.network/liore/duplicaci.git
+git clone https://github.com/lioreshai/duplicaci.git
 cd duplicaci
 go build -o duplicaci .
 ```
@@ -95,7 +95,7 @@ jobs:
           go-version: '1.21'
 
       - name: Install duplicaci
-        run: go install github.com/liore/duplicaci@latest
+        run: go install github.com/lioreshai/duplicaci@latest
 
       - name: Setup SSH
         run: |

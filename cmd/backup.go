@@ -5,9 +5,9 @@ import (
 	"os"
 	"strings"
 
-	"git.shai.network/liore/duplicaci/internal/config"
-	"git.shai.network/liore/duplicaci/internal/executor"
-	"git.shai.network/liore/duplicaci/internal/notifier"
+	"github.com/lioreshai/duplicaci/internal/config"
+	"github.com/lioreshai/duplicaci/internal/executor"
+	"github.com/lioreshai/duplicaci/internal/notifier"
 	"github.com/spf13/cobra"
 )
 

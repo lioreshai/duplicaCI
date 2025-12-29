@@ -1,4 +1,4 @@
-module git.shai.network/liore/duplicaci
+module github.com/lioreshai/duplicaci
 
 go 1.19
 

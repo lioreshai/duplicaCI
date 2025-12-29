@@ -5,7 +5,7 @@ import (
 	"os"
 	"strings"
 
-	"git.shai.network/liore/duplicaci/internal/executor"
+	"github.com/lioreshai/duplicaci/internal/executor"
 	"github.com/spf13/cobra"
 )
 

@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"git.shai.network/liore/duplicaci/cmd"
+	"github.com/lioreshai/duplicaci/cmd"
 )
 
 var (
