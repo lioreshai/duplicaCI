@@ -8,10 +8,10 @@ import (
 
 // Config represents the duplicaci configuration file
 type Config struct {
-	SSH           SSHConfig           `yaml:"ssh"`
-	Docker        DockerConfig        `yaml:"docker"`
-	Repositories  []RepositoryConfig  `yaml:"repositories"`
-	Notifications NotificationConfig  `yaml:"notifications"`
+	SSH           SSHConfig          `yaml:"ssh"`
+	Docker        DockerConfig       `yaml:"docker"`
+	Repositories  []RepositoryConfig `yaml:"repositories"`
+	Notifications NotificationConfig `yaml:"notifications"`
 }
 
 // SSHConfig holds SSH connection settings
