@@ -1,227 +1,276 @@
 # duplicaci
 
-**Duplicacy + CI** - A Go wrapper for running [Duplicacy](https://duplicacy.com/) backups in CI/CD pipelines.
+Run [Duplicacy](https://duplicacy.com/) backups from CI/CD pipelines.
 
-## Overview
+## Use Case
 
-duplicaci is designed to orchestrate Duplicacy backup operations from CI/CD systems like GitHub Actions, Forgejo Actions, GitLab CI, or any cron-based scheduler. It provides:
+You have Duplicacy Web running in a Docker container. It works great for restores and monitoring, but you want backup scheduling controlled by CI/CD where configuration is version-controlled and you get native notifications.
 
-- **Structured backup execution** - Run backup, prune, check, and copy operations
-- **Failure notifications** - Create issues in Forgejo/GitHub when backups fail
-- **Docker support** - Execute commands inside a Duplicacy container or directly via CLI
-- **Dry-run mode** - Preview commands without executing
-- **Exit code handling** - Proper exit codes for CI/CD pipeline integration
-
-## Why duplicaci?
-
-Duplicacy's Web GUI is excellent for interactive use (restores, browsing backups, monitoring), but backup scheduling is better suited for version-controlled CI/CD pipelines:
-
-- **Version-controlled schedules** - Backup configuration lives in git
-- **Unified automation** - Same platform as your other scheduled tasks
-- **Built-in notifications** - Leverage CI/CD notification systems
-- **Audit trail** - Complete history of backup runs in CI logs
-
-duplicaci bridges the gap: use it for automated backups while keeping the Web GUI for everything else.
-
-### Operation Order
-
-When using `--check` and `--prune` flags, operations run in this order (per Duplicacy best practices):
-
-1. **Backup** - Create new backup snapshot
-2. **Check** - Verify backup integrity
-3. **Prune** - Remove old snapshots according to retention policy
-
-This order ensures integrity is verified before any snapshots are deleted.
-
-## Installation
-
-```bash
-# From source
-go install github.com/lioreshai/duplicaci@latest
-
-# Or build locally
-git clone https://github.com/lioreshai/duplicaci.git
-cd duplicaci
-go build -o duplicaci .
-```
+**duplicaci** runs Duplicacy CLI commands via SSH into your Docker container, letting you:
+- Schedule backups via GitHub Actions, Forgejo Actions, GitLab CI, or cron
+- Keep backup configuration in git alongside your infrastructure code
+- Get failure notifications as repository issues
+- Use the Web GUI for restores and browsing (scheduling disabled)
 
 ## Quick Start
 
-### Basic Usage
+### 1. Download the binary
 
-```bash
-# Run a backup
-duplicaci backup --repository myrepo --storage gdrive
-
-# Run backup with prune
-duplicaci backup --repository myrepo --storage gdrive --prune
-
-# Check backup integrity
-duplicaci check --repository myrepo --storage gdrive
-
-# Dry run (show commands without executing)
-duplicaci backup --repository myrepo --storage gdrive --dry-run
+```yaml
+- name: Download duplicaci
+  run: |
+    curl -sL -o duplicaci \
+      "https://github.com/lioreshai/duplicaci/releases/download/v0.1.8/duplicaci_linux_amd64"
+    chmod +x duplicaci
 ```
 
-### Docker Mode
-
-If Duplicacy runs in a Docker container (common with Duplicacy Web):
+### 2. Run a backup
 
 ```bash
-# Execute inside container
-duplicaci backup \
-  --repository myrepo \
-  --storage gdrive \
-  --docker-container Duplicacy
-
-# With SSH to remote host
-duplicaci backup \
-  --repository myrepo \
-  --storage gdrive \
+./duplicaci backup \
+  --repository my_backup \
+  --storage MyStorage \
   --docker-container Duplicacy \
   --ssh-host root@192.168.1.100
 ```
 
-### CI/CD Integration
+## Complete Workflow Example
 
-#### Forgejo/GitHub Actions
+This workflow runs daily backups to multiple storage backends with failure notifications:
 
 ```yaml
 name: Daily Backup
+
 on:
   schedule:
-    - cron: '0 1 * * *'
+    - cron: '0 6 * * *'  # 6:00 UTC daily
   workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry run (print commands without executing)'
+        type: boolean
+        default: false
 
 jobs:
   backup:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Setup tools
+        run: sudo apt-get update && sudo apt-get install -y sshpass
 
-      - name: Setup Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: '1.21'
-
-      - name: Install duplicaci
-        run: go install github.com/lioreshai/duplicaci@latest
-
-      - name: Setup SSH
+      - name: Download duplicaci
         run: |
-          mkdir -p ~/.ssh
-          echo "${{ secrets.SSH_PRIVATE_KEY }}" | base64 -d > ~/.ssh/id_rsa
-          chmod 600 ~/.ssh/id_rsa
+          curl -sL -o duplicaci \
+            "https://github.com/lioreshai/duplicaci/releases/download/v0.1.8/duplicaci_linux_amd64"
+          chmod +x duplicaci
 
-      - name: Run backup
+      - name: Run backups
         env:
           SSH_PASSWORD: ${{ secrets.SSH_PASSWORD }}
+          DUPLICACY_PASSWORD: ${{ secrets.STORAGE_PASSWORD }}
           FORGEJO_TOKEN: ${{ secrets.FORGEJO_TOKEN }}
         run: |
-          duplicaci backup \
-            --config backup-config.yaml \
-            --ssh-host root@192.168.1.100 \
-            --ssh-password "$SSH_PASSWORD" \
-            --create-issues \
-            --forgejo-url https://git.example.com \
-            --forgejo-repo myuser/duplicaci
+          set +e
+          FAILED=0
+
+          COMMON="--docker-container Duplicacy --ssh-host root@192.168.1.100 --verbose"
+          NOTIFY="--create-issues --forgejo-url https://git.example.com --forgejo-repo user/repo --assignee user"
+          STORAGES="NASBackup,GoogleDrive"
+
+          # Phase 1: Backups
+          ./duplicaci backup $COMMON $NOTIFY \
+            -r server_appdata \
+            --storage $STORAGES \
+            --cache-dir /cache/localhost/0 \
+            --gcd-token /config/gcd-token.json
+          [ $? -ne 0 ] && FAILED=1
+
+          # Phase 2: Prune old revisions
+          ./duplicaci prune $COMMON \
+            --storage $STORAGES \
+            --cache-dir /cache/localhost/0 \
+            --gcd-token /config/gcd-token.json
+          [ $? -ne 0 ] && FAILED=1
+
+          # Phase 3: Verify integrity
+          ./duplicaci check $COMMON \
+            --storage $STORAGES \
+            --cache-dir /cache/localhost/0 \
+            --gcd-token /config/gcd-token.json
+          [ $? -ne 0 ] && FAILED=1
+
+          exit $FAILED
 ```
 
-## Configuration
+## Commands
 
-### Command Line
+### backup
+
+Create a backup snapshot.
 
 ```bash
-duplicaci backup [flags]
-
-Flags:
-      --repository string      Repository ID to backup
-      --storage string         Storage backend name (can be specified multiple times)
-      --prune                  Run prune after check
-      --prune-options string   Prune options (default: "-keep 0:180 -keep 7:14 -keep 1:1 -a")
-      --check                  Run check after backup (before prune)
-      --docker-container string  Run inside Docker container
-      --ssh-host string        SSH to host before running (user@host)
-      --ssh-password string    SSH password (or use SSH_PASSWORD env var)
-      --dry-run                Print commands without executing
-      --create-issues          Create Forgejo/GitHub issue on failure
-      --forgejo-url string     Forgejo server URL
-      --forgejo-repo string    Repository for issues (owner/repo)
-      --forgejo-token string   Forgejo API token (or FORGEJO_TOKEN env var)
-      --config string          Config file path
+./duplicaci backup \
+  -r <repository_id> \
+  --storage <storage1,storage2> \
+  --docker-container <container_name> \
+  --ssh-host <user@host> \
+  --cache-dir <path> \
+  --backup-options '-threads 4'
 ```
 
-### Config File
+### prune
 
-```yaml
-# backup-config.yaml
-ssh:
-  host: root@192.168.1.100
-  password_env: SSH_PASSWORD  # Read from environment variable
-
-docker:
-  container: Duplicacy
-
-repositories:
-  - id: server_appdata
-    storage:
-      - gdrive
-      - nas-backup
-    prune: true
-    prune_options: "-keep 0:180 -keep 7:14 -keep 1:1 -a"
-
-  - id: network_config
-    storage:
-      - gdrive
-      - nas-backup
-    prune: true
-
-notifications:
-  forgejo:
-    url: https://git.example.com
-    repo: myuser/duplicaci
-    token_env: FORGEJO_TOKEN
-    assignee: myuser
-```
-
-## Notifications
-
-When `--create-issues` is enabled, duplicaci creates or updates issues on backup failure:
-
-- **New failure**: Creates issue with error details and logs
-- **Repeated failure**: Adds comment to existing open issue
-- **Recovery**: Adds success comment (doesn't auto-close)
-
-Issue title format: `[duplicaci] repository: backup failed`
-
-## Exit Codes
-
-| Code | Meaning |
-|------|---------|
-| 0 | Success |
-| 1 | Backup failed |
-| 2 | Configuration error |
-| 3 | SSH/connection error |
-| 4 | Notification error (backup may have succeeded) |
-
-## Development
+Remove old revisions according to retention policy.
 
 ```bash
-# Build
+./duplicaci prune \
+  --storage <storage1,storage2> \
+  --docker-container <container_name> \
+  --ssh-host <user@host> \
+  --cache-dir <path> \
+  --prune-options '-keep 0:180 -keep 7:14 -keep 1:1 -a'
+```
+
+### check
+
+Verify backup integrity.
+
+```bash
+./duplicaci check \
+  --storage <storage1,storage2> \
+  --docker-container <container_name> \
+  --ssh-host <user@host> \
+  --cache-dir <path>
+```
+
+## Common Options
+
+| Flag | Description |
+|------|-------------|
+| `-r, --repository` | Duplicacy repository ID |
+| `-s, --storage` | Storage backend(s), comma-separated |
+| `--docker-container` | Docker container name to exec into |
+| `--ssh-host` | SSH to host before running (user@host) |
+| `--cache-dir` | Duplicacy cache directory (e.g., /cache/localhost/0) |
+| `--gcd-token` | Google Drive token file path inside container |
+| `--dry-run` | Print commands without executing |
+| `--verbose` | Show detailed output |
+
+### Notification Options
+
+| Flag | Description |
+|------|-------------|
+| `--create-issues` | Create issue on failure |
+| `--forgejo-url` | Forgejo/GitHub server URL |
+| `--forgejo-repo` | Repository for issues (owner/repo) |
+| `--assignee` | Assign issues to this user |
+
+## Environment Variables
+
+duplicaci reads credentials from environment variables:
+
+| Variable | Purpose |
+|----------|---------|
+| `SSH_PASSWORD` | SSH password for remote host |
+| `DUPLICACY_PASSWORD` | Storage encryption password |
+| `FORGEJO_TOKEN` | API token for issue creation |
+
+### Storage-Specific Passwords
+
+Duplicacy uses storage-specific environment variables for non-default storages:
+
+```
+DUPLICACY_PASSWORD              # Default for all storages
+DUPLICACY_MYSTORAGE_PASSWORD    # Specific to "MyStorage"
+DUPLICACY_MYSTORAGE_GCD_TOKEN   # Google Drive token path for "MyStorage"
+```
+
+Storage names are uppercased with hyphens converted to underscores.
+
+## Prerequisites
+
+1. **Duplicacy initialized** - Repositories must be set up (via Web GUI or CLI)
+2. **Storage credentials configured** - OAuth tokens and passwords in Duplicacy's keyring
+3. **SSH access** - Password or key-based access to the backup host
+4. **sshpass installed** - Required for password-based SSH in CI
+
+```bash
+sudo apt-get install sshpass
+```
+
+## Workflow Phases
+
+A typical backup workflow runs three phases:
+
+1. **Backup** - Create new snapshots for each repository
+2. **Prune** - Apply retention policy to remove old revisions
+3. **Check** - Verify backup integrity
+
+Run backups first so new data is protected before any deletions.
+
+## Failure Notifications
+
+With `--create-issues`, duplicaci creates repository issues on failure:
+
+- **Title**: `[duplicaci] repository_name: backup failed`
+- **Body**: Error details and timestamp
+- **Assignee**: Specified user (optional)
+
+Subsequent failures on the same repository add comments to the existing issue rather than creating duplicates.
+
+## Tips
+
+### Continue on Error
+
+Use `set +e` and track failures to run all backups even if one fails:
+
+```bash
+set +e
+FAILED=0
+
+./duplicaci backup ... -r repo1
+[ $? -ne 0 ] && FAILED=1
+
+./duplicaci backup ... -r repo2
+[ $? -ne 0 ] && FAILED=1
+
+exit $FAILED
+```
+
+### Dry Run
+
+Preview commands without executing:
+
+```bash
+./duplicaci backup --dry-run --verbose ...
+```
+
+### Multiple Storages
+
+Specify multiple storages as comma-separated values:
+
+```bash
+--storage NASBackup,GoogleDrive,S3Backup
+```
+
+### Duplicacy Web GUI
+
+After migration, keep the Web GUI for:
+- Restoring files
+- Browsing backup history
+- Monitoring storage usage
+- Manual operations
+
+Just disable the scheduled jobs in the Web GUI.
+
+## Building from Source
+
+```bash
+git clone https://github.com/lioreshai/duplicaci.git
+cd duplicaci
 go build -o duplicaci .
-
-# Test
-go test ./...
-
-# Run locally
-./duplicaci backup --dry-run --repository test --storage local
 ```
 
 ## License
 
-MIT License - see [LICENSE](LICENSE) for details.
-
-## Related Projects
-
-- [Duplicacy](https://duplicacy.com/) - The backup tool this wraps
-- [duplicacy-util](https://github.com/jeffaco/duplicacy-util) - Another CLI wrapper with email notifications
+MIT
