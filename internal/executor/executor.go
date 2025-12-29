@@ -153,8 +153,10 @@ func (e *Executor) buildCommandWithStorage(duplicacyBin string, args []string, s
 		// Get the password for this storage (check per-storage first, then default)
 		password := e.getStoragePassword(storageName)
 		if password != "" {
-			// Pass the generic DUPLICACY_PASSWORD which works for all storages
-			dockerEnv = fmt.Sprintf("-e DUPLICACY_PASSWORD='%s' ", password)
+			// Pass the password via DUPLICACY_PASSWORD env var
+			// Use double quotes to avoid conflicts with the outer single-quote SSH escaping
+			escapedPw := strings.ReplaceAll(password, "\"", "\\\"")
+			dockerEnv = fmt.Sprintf("-e \"DUPLICACY_PASSWORD=%s\" ", escapedPw)
 		}
 
 		if workDir != "" {
