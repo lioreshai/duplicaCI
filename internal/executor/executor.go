@@ -14,6 +14,7 @@ type Options struct {
 	DockerContainer string
 	SSHHost         string
 	SSHPassword     string
+	DuplicacyPath   string // Path to duplicacy binary (default: "duplicacy")
 }
 
 // Executor runs duplicacy commands
@@ -45,8 +46,12 @@ func (e *Executor) RunDuplicacy(args ...string) error {
 
 // buildCommand constructs the full command string
 func (e *Executor) buildCommand(args []string) string {
-	// Base duplicacy command
-	duplicacyCmd := "duplicacy " + strings.Join(args, " ")
+	// Base duplicacy command (use custom path if specified)
+	duplicacyBin := e.opts.DuplicacyPath
+	if duplicacyBin == "" {
+		duplicacyBin = "duplicacy"
+	}
+	duplicacyCmd := duplicacyBin + " " + strings.Join(args, " ")
 
 	// Wrap in docker exec if container specified
 	if e.opts.DockerContainer != "" {

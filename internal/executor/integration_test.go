@@ -25,12 +25,13 @@ import (
 //
 // Run with: go test -tags=integration -v ./internal/executor/
 
-func getIntegrationConfig(t *testing.T) (host, password, container, repoPath, storage string) {
+func getIntegrationConfig(t *testing.T) (host, password, container, repoPath, storage, duplicacyPath string) {
 	host = os.Getenv("INTEGRATION_SSH_HOST")
 	password = os.Getenv("INTEGRATION_SSH_PASSWORD")
 	container = os.Getenv("INTEGRATION_DOCKER_CONTAINER")
 	repoPath = os.Getenv("INTEGRATION_REPO_PATH")
 	storage = os.Getenv("INTEGRATION_STORAGE")
+	duplicacyPath = os.Getenv("INTEGRATION_DUPLICACY_PATH") // e.g., /usr/bin/duplicacy
 
 	// At minimum we need a repo path to test with
 	if repoPath == "" {
@@ -53,7 +54,7 @@ func TestIntegration_DuplicacyVersion(t *testing.T) {
 }
 
 func TestIntegration_DuplicacyList(t *testing.T) {
-	_, _, container, repoPath, storage := getIntegrationConfig(t)
+	_, _, container, repoPath, storage, duplicacyPath := getIntegrationConfig(t)
 
 	if storage == "" {
 		t.Skip("INTEGRATION_STORAGE required")
@@ -61,6 +62,7 @@ func TestIntegration_DuplicacyList(t *testing.T) {
 
 	exec := New(Options{
 		DockerContainer: container, // empty if not using Docker
+		DuplicacyPath:   duplicacyPath,
 		Verbose:         true,
 	})
 
@@ -72,7 +74,7 @@ func TestIntegration_DuplicacyList(t *testing.T) {
 }
 
 func TestIntegration_DuplicacyBackupAndList(t *testing.T) {
-	_, _, container, repoPath, storage := getIntegrationConfig(t)
+	_, _, container, repoPath, storage, duplicacyPath := getIntegrationConfig(t)
 
 	if storage == "" {
 		t.Skip("INTEGRATION_STORAGE required")
@@ -80,6 +82,7 @@ func TestIntegration_DuplicacyBackupAndList(t *testing.T) {
 
 	exec := New(Options{
 		DockerContainer: container,
+		DuplicacyPath:   duplicacyPath,
 		Verbose:         true,
 	})
 
@@ -97,7 +100,7 @@ func TestIntegration_DuplicacyBackupAndList(t *testing.T) {
 }
 
 func TestIntegration_DuplicacyCheck(t *testing.T) {
-	_, _, container, repoPath, storage := getIntegrationConfig(t)
+	_, _, container, repoPath, storage, duplicacyPath := getIntegrationConfig(t)
 
 	if storage == "" {
 		t.Skip("INTEGRATION_STORAGE required")
@@ -105,6 +108,7 @@ func TestIntegration_DuplicacyCheck(t *testing.T) {
 
 	exec := New(Options{
 		DockerContainer: container,
+		DuplicacyPath:   duplicacyPath,
 		Verbose:         true,
 	})
 
@@ -138,7 +142,7 @@ func TestIntegration_CommandBuilding_LocalDirect(t *testing.T) {
 }
 
 func TestIntegration_CommandBuilding_Docker(t *testing.T) {
-	_, _, container, _, _ := getIntegrationConfig(t)
+	_, _, container, _, _, duplicacyPath := getIntegrationConfig(t)
 
 	if container == "" {
 		t.Skip("INTEGRATION_DOCKER_CONTAINER required for Docker test")
@@ -146,6 +150,7 @@ func TestIntegration_CommandBuilding_Docker(t *testing.T) {
 
 	exec := New(Options{
 		DockerContainer: container,
+		DuplicacyPath:   duplicacyPath,
 		Verbose:         true,
 	})
 
@@ -157,7 +162,7 @@ func TestIntegration_CommandBuilding_Docker(t *testing.T) {
 }
 
 func TestIntegration_CommandBuilding_SSH(t *testing.T) {
-	host, password, container, _, _ := getIntegrationConfig(t)
+	host, password, container, _, _, duplicacyPath := getIntegrationConfig(t)
 
 	if host == "" || password == "" {
 		t.Skip("SSH tests require INTEGRATION_SSH_HOST and INTEGRATION_SSH_PASSWORD")
@@ -167,6 +172,7 @@ func TestIntegration_CommandBuilding_SSH(t *testing.T) {
 		SSHHost:         host,
 		SSHPassword:     password,
 		DockerContainer: container,
+		DuplicacyPath:   duplicacyPath,
 		Verbose:         true,
 	})
 
@@ -181,10 +187,11 @@ func TestIntegration_CommandBuilding_SSH(t *testing.T) {
 }
 
 func TestIntegration_DryRunDoesNotExecute(t *testing.T) {
-	_, _, container, _, _ := getIntegrationConfig(t)
+	_, _, container, _, _, duplicacyPath := getIntegrationConfig(t)
 
 	exec := New(Options{
 		DockerContainer: container,
+		DuplicacyPath:   duplicacyPath,
 		DryRun:          true,
 		Verbose:         true,
 	})
