@@ -26,6 +26,7 @@ func init() {
 	pruneCmd.Flags().StringVar(&sshHost, "ssh-host", "", "SSH to host before running (user@host)")
 	pruneCmd.Flags().StringVar(&sshPassword, "ssh-password", "", "SSH password (or SSH_PASSWORD env)")
 	pruneCmd.Flags().StringVar(&storagePassword, "storage-password", "", "Duplicacy storage encryption password (or DUPLICACY_PASSWORD env)")
+	pruneCmd.Flags().StringVar(&gcdToken, "gcd-token", "", "Google Drive token file path (for gcd:// storages)")
 }
 
 func runPruneCmd(cmd *cobra.Command, args []string) error {
@@ -50,6 +51,7 @@ func runPruneCmd(cmd *cobra.Command, args []string) error {
 		RepoPath:        repoPath,
 		CacheDir:        cacheDir,
 		StoragePassword: storagePassword,
+		GCDToken:        gcdToken,
 	})
 
 	var hasErrors bool
