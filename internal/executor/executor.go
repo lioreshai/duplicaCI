@@ -163,7 +163,16 @@ func (e *Executor) buildCommandWithStorage(duplicacyBin string, args []string, s
 				escapedPw = strings.ReplaceAll(escapedPw, "\"", "\\\"")
 				escapedPw = strings.ReplaceAll(escapedPw, "$", "\\$")
 				escapedPw = strings.ReplaceAll(escapedPw, "`", "\\`")
-				shellCmd = fmt.Sprintf("export DUPLICACY_PASSWORD=\"%s\" && %s", escapedPw, shellCmd)
+
+				// Set both generic and storage-specific password env vars
+				// Duplicacy uses DUPLICACY_<STORAGENAME>_PASSWORD for non-default storages
+				exports := fmt.Sprintf("export DUPLICACY_PASSWORD=\"%s\"", escapedPw)
+				if storageName != "" {
+					// Convert storage name to uppercase for env var
+					upperName := strings.ToUpper(strings.ReplaceAll(storageName, "-", "_"))
+					exports += fmt.Sprintf(" && export DUPLICACY_%s_PASSWORD=\"%s\"", upperName, escapedPw)
+				}
+				shellCmd = exports + " && " + shellCmd
 			}
 
 			duplicacyCmd = fmt.Sprintf("docker exec %s sh -c '%s'", e.opts.DockerContainer, shellCmd)
