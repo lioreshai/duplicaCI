@@ -1,0 +1,65 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+
+      - name: Get version from tag
+        id: version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+      - name: Build binaries
+        run: |
+          VERSION=${{ steps.version.outputs.VERSION }}
+          COMMIT=$(git rev-parse --short HEAD)
+          DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          LDFLAGS="-X main.version=${VERSION} -X main.commit=${COMMIT} -X main.date=${DATE}"
+
+          # Linux amd64
+          GOOS=linux GOARCH=amd64 go build -ldflags "${LDFLAGS}" -o duplicaci-linux-amd64 .
+
+          # Linux arm64
+          GOOS=linux GOARCH=arm64 go build -ldflags "${LDFLAGS}" -o duplicaci-linux-arm64 .
+
+          # Darwin amd64
+          GOOS=darwin GOARCH=amd64 go build -ldflags "${LDFLAGS}" -o duplicaci-darwin-amd64 .
+
+          # Darwin arm64
+          GOOS=darwin GOARCH=arm64 go build -ldflags "${LDFLAGS}" -o duplicaci-darwin-arm64 .
+
+          # Windows amd64
+          GOOS=windows GOARCH=amd64 go build -ldflags "${LDFLAGS}" -o duplicaci-windows-amd64.exe .
+
+      - name: Create checksums
+        run: |
+          sha256sum duplicaci-* > checksums.txt
+          cat checksums.txt
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            duplicaci-linux-amd64
+            duplicaci-linux-arm64
+            duplicaci-darwin-amd64
+            duplicaci-darwin-arm64
+            duplicaci-windows-amd64.exe
+            checksums.txt
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

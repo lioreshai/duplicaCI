@@ -1,0 +1,45 @@
+# Binaries
+duplicaci
+duplicaci.exe
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Test binary
+*.test
+
+# Output of the go coverage tool
+*.out
+coverage.html
+
+# Dependency directories
+vendor/
+
+# Go workspace files
+go.work
+go.work.sum
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Local config (may contain secrets)
+*.local.yaml
+.env
+.env.*
+
+# Build output
+dist/
+build/
+
+# Logs
+*.log
+logs/
