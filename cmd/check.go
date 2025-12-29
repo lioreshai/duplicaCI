@@ -17,10 +17,13 @@ var checkCmd = &cobra.Command{
 
 func init() {
 	checkCmd.Flags().StringVarP(&repository, "repository", "r", "", "Repository ID")
+	checkCmd.Flags().StringVarP(&repoPath, "repo-path", "p", "", "Path to repository (cd here before running duplicacy)")
+	checkCmd.Flags().StringVar(&cacheDir, "cache-dir", "", "Duplicacy Web GUI cache directory (e.g., /cache/localhost/0)")
 	checkCmd.Flags().StringSliceVarP(&storages, "storage", "s", []string{}, "Storage backend(s) to check")
 	checkCmd.Flags().StringVar(&dockerContainer, "docker-container", "", "Run inside Docker container")
 	checkCmd.Flags().StringVar(&sshHost, "ssh-host", "", "SSH to host before running (user@host)")
 	checkCmd.Flags().StringVar(&sshPassword, "ssh-password", "", "SSH password (or SSH_PASSWORD env)")
+	checkCmd.Flags().StringVar(&storagePassword, "storage-password", "", "Duplicacy storage encryption password (or DUPLICACY_PASSWORD env)")
 }
 
 func runCheckCmd(cmd *cobra.Command, args []string) error {
@@ -32,12 +35,19 @@ func runCheckCmd(cmd *cobra.Command, args []string) error {
 		sshPassword = os.Getenv("SSH_PASSWORD")
 	}
 
+	if storagePassword == "" {
+		storagePassword = os.Getenv("DUPLICACY_PASSWORD")
+	}
+
 	exec := executor.New(executor.Options{
 		DryRun:          dryRun,
 		Verbose:         verbose,
 		DockerContainer: dockerContainer,
 		SSHHost:         sshHost,
 		SSHPassword:     sshPassword,
+		RepoPath:        repoPath,
+		CacheDir:        cacheDir,
+		StoragePassword: storagePassword,
 	})
 
 	var hasErrors bool
@@ -45,7 +55,7 @@ func runCheckCmd(cmd *cobra.Command, args []string) error {
 	for _, storage := range storages {
 		fmt.Printf("==> Checking storage '%s'\n", storage)
 
-		err := exec.RunDuplicacy("check", "-storage", storage)
+		err := exec.RunDuplicacyWithStorage(storage, "check", "-storage", storage)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "ERROR: check on %s failed: %v\n", storage, err)
 			hasErrors = true

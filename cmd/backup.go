@@ -15,6 +15,7 @@ var (
 	// Backup flags
 	repository      string
 	repoPath        string
+	cacheDir        string
 	storages        []string
 	backupOptions   string
 	runPrune        bool
@@ -23,6 +24,7 @@ var (
 	dockerContainer string
 	sshHost         string
 	sshPassword     string
+	storagePassword string
 
 	// Notification flags
 	createIssues bool
@@ -44,6 +46,7 @@ Optionally run prune and/or check operations after the backup completes.`,
 func init() {
 	backupCmd.Flags().StringVarP(&repository, "repository", "r", "", "Repository ID to backup")
 	backupCmd.Flags().StringVarP(&repoPath, "repo-path", "p", "", "Path to repository (cd here before running duplicacy)")
+	backupCmd.Flags().StringVar(&cacheDir, "cache-dir", "", "Duplicacy Web GUI cache directory (e.g., /cache/localhost/0)")
 	backupCmd.Flags().StringSliceVarP(&storages, "storage", "s", []string{}, "Storage backend(s) to backup to")
 	backupCmd.Flags().StringVar(&backupOptions, "backup-options", "", "Additional backup options (e.g., '-threads 4')")
 	backupCmd.Flags().BoolVar(&runPrune, "prune", false, "Run prune after backup")
@@ -53,6 +56,7 @@ func init() {
 	backupCmd.Flags().StringVar(&dockerContainer, "docker-container", "", "Run inside Docker container")
 	backupCmd.Flags().StringVar(&sshHost, "ssh-host", "", "SSH to host before running (user@host)")
 	backupCmd.Flags().StringVar(&sshPassword, "ssh-password", "", "SSH password (or SSH_PASSWORD env)")
+	backupCmd.Flags().StringVar(&storagePassword, "storage-password", "", "Duplicacy storage encryption password (or DUPLICACY_PASSWORD env)")
 
 	backupCmd.Flags().BoolVar(&createIssues, "create-issues", false, "Create Forgejo/GitHub issue on failure")
 	backupCmd.Flags().StringVar(&forgejoURL, "forgejo-url", "", "Forgejo server URL")
@@ -88,6 +92,11 @@ func runBackup(cmd *cobra.Command, args []string) error {
 		sshPassword = os.Getenv("SSH_PASSWORD")
 	}
 
+	// Get storage password from env if not set
+	if storagePassword == "" {
+		storagePassword = os.Getenv("DUPLICACY_PASSWORD")
+	}
+
 	// Get Forgejo token from env if not set
 	if forgejoToken == "" {
 		forgejoToken = os.Getenv("FORGEJO_TOKEN")
@@ -101,6 +110,8 @@ func runBackup(cmd *cobra.Command, args []string) error {
 		SSHHost:         sshHost,
 		SSHPassword:     sshPassword,
 		RepoPath:        repoPath,
+		CacheDir:        cacheDir,
+		StoragePassword: storagePassword,
 	})
 
 	var allErrors []string
@@ -114,7 +125,7 @@ func runBackup(cmd *cobra.Command, args []string) error {
 			backupArgs = append(backupArgs, strings.Fields(backupOptions)...)
 		}
 
-		err := exec.RunDuplicacy(backupArgs...)
+		err := exec.RunDuplicacyWithStorage(storage, backupArgs...)
 		if err != nil {
 			errMsg := fmt.Sprintf("backup to %s failed: %v", storage, err)
 			allErrors = append(allErrors, errMsg)
@@ -130,7 +141,7 @@ func runBackup(cmd *cobra.Command, args []string) error {
 		for _, storage := range storages {
 			fmt.Printf("==> Checking storage '%s'\n", storage)
 
-			err := exec.RunDuplicacy("check", "-storage", storage)
+			err := exec.RunDuplicacyWithStorage(storage, "check", "-storage", storage)
 			if err != nil {
 				errMsg := fmt.Sprintf("check on %s failed: %v", storage, err)
 				allErrors = append(allErrors, errMsg)
@@ -147,7 +158,7 @@ func runBackup(cmd *cobra.Command, args []string) error {
 			pruneArgs := []string{"prune", "-storage", storage}
 			pruneArgs = append(pruneArgs, strings.Fields(pruneOptions)...)
 
-			err := exec.RunDuplicacy(pruneArgs...)
+			err := exec.RunDuplicacyWithStorage(storage, pruneArgs...)
 			if err != nil {
 				errMsg := fmt.Sprintf("prune on %s failed: %v", storage, err)
 				allErrors = append(allErrors, errMsg)

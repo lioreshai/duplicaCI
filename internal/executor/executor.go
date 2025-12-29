@@ -11,13 +11,16 @@ import (
 
 // Options configures the executor
 type Options struct {
-	DryRun          bool
-	Verbose         bool
-	DockerContainer string
-	SSHHost         string
-	SSHPassword     string
-	DuplicacyPath   string // Path to duplicacy binary (default: auto-discover)
-	RepoPath        string // Repository path to cd into before running duplicacy
+	DryRun           bool
+	Verbose          bool
+	DockerContainer  string
+	SSHHost          string
+	SSHPassword      string
+	DuplicacyPath    string            // Path to duplicacy binary (default: auto-discover)
+	RepoPath         string            // Repository path to cd into before running duplicacy
+	CacheDir         string            // Duplicacy Web GUI cache directory (e.g., /cache/localhost/0)
+	StoragePassword  string            // Default storage encryption password
+	StoragePasswords map[string]string // Per-storage passwords (storage name -> password)
 }
 
 // Executor runs duplicacy commands
@@ -97,14 +100,19 @@ func (e *Executor) discoverDuplicacyPath() (string, error) {
 
 // RunDuplicacy executes a duplicacy command with the given arguments
 func (e *Executor) RunDuplicacy(args ...string) error {
+	return e.RunDuplicacyWithStorage("", args...)
+}
+
+// RunDuplicacyWithStorage executes a duplicacy command with storage-specific password
+func (e *Executor) RunDuplicacyWithStorage(storageName string, args ...string) error {
 	// Discover duplicacy path first (cached after first call)
 	duplicacyBin, err := e.discoverDuplicacyPath()
 	if err != nil {
 		return fmt.Errorf("cannot find duplicacy: %w", err)
 	}
 
-	// Build the full command
-	cmdStr := e.buildCommand(duplicacyBin, args)
+	// Build the full command with storage-specific password
+	cmdStr := e.buildCommandWithStorage(duplicacyBin, args, storageName)
 
 	if e.opts.Verbose || e.opts.DryRun {
 		fmt.Printf("    Command: %s\n", cmdStr)
@@ -118,23 +126,43 @@ func (e *Executor) RunDuplicacy(args ...string) error {
 	return e.execute(cmdStr)
 }
 
-// buildCommand constructs the full command string
+// buildCommand constructs the full command string (for backward compatibility)
 func (e *Executor) buildCommand(duplicacyBin string, args []string) string {
+	return e.buildCommandWithStorage(duplicacyBin, args, "")
+}
+
+// buildCommandWithStorage constructs the full command string with storage-specific password
+func (e *Executor) buildCommandWithStorage(duplicacyBin string, args []string, storageName string) string {
 	duplicacyCmd := duplicacyBin + " " + strings.Join(args, " ")
 
-	// If repo path specified, cd to it first
-	if e.opts.RepoPath != "" {
-		duplicacyCmd = fmt.Sprintf("cd %s && %s", e.opts.RepoPath, duplicacyCmd)
+	// Determine working directory: CacheDir takes precedence over RepoPath
+	workDir := e.opts.CacheDir
+	if workDir == "" {
+		workDir = e.opts.RepoPath
 	}
 
-	// Wrap in docker exec if container specified
+	// If working directory specified, cd to it first
+	if workDir != "" {
+		duplicacyCmd = fmt.Sprintf("cd %s && %s", workDir, duplicacyCmd)
+	}
+
+	// Build docker exec with optional environment variables
 	if e.opts.DockerContainer != "" {
-		if e.opts.RepoPath != "" {
+		dockerEnv := ""
+
+		// Get the password for this storage (check per-storage first, then default)
+		password := e.getStoragePassword(storageName)
+		if password != "" {
+			// Pass the generic DUPLICACY_PASSWORD which works for all storages
+			dockerEnv = fmt.Sprintf("-e DUPLICACY_PASSWORD='%s' ", password)
+		}
+
+		if workDir != "" {
 			// Need sh -c to handle cd && command
-			duplicacyCmd = fmt.Sprintf("docker exec %s sh -c '%s'", e.opts.DockerContainer, duplicacyCmd)
+			duplicacyCmd = fmt.Sprintf("docker exec %s%s sh -c '%s'", dockerEnv, e.opts.DockerContainer, duplicacyCmd)
 		} else {
 			// Simple command, no shell needed
-			duplicacyCmd = fmt.Sprintf("docker exec %s %s", e.opts.DockerContainer, duplicacyCmd)
+			duplicacyCmd = fmt.Sprintf("docker exec %s%s %s", dockerEnv, e.opts.DockerContainer, duplicacyCmd)
 		}
 	}
 
@@ -153,6 +181,18 @@ func (e *Executor) buildCommand(duplicacyBin string, args []string) string {
 	}
 
 	return duplicacyCmd
+}
+
+// getStoragePassword returns the password for a storage, checking per-storage first then default
+func (e *Executor) getStoragePassword(storageName string) string {
+	// Check per-storage passwords first
+	if storageName != "" && e.opts.StoragePasswords != nil {
+		if pw, ok := e.opts.StoragePasswords[storageName]; ok {
+			return pw
+		}
+	}
+	// Fall back to default password
+	return e.opts.StoragePassword
 }
 
 // execute runs the command and streams output
