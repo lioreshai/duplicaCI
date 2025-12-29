@@ -14,6 +14,7 @@ import (
 var (
 	// Backup flags
 	repository      string
+	repoPath        string
 	storages        []string
 	runPrune        bool
 	pruneOptions    string
@@ -41,6 +42,7 @@ Optionally run prune and/or check operations after the backup completes.`,
 
 func init() {
 	backupCmd.Flags().StringVarP(&repository, "repository", "r", "", "Repository ID to backup")
+	backupCmd.Flags().StringVarP(&repoPath, "repo-path", "p", "", "Path to repository (cd here before running duplicacy)")
 	backupCmd.Flags().StringSliceVarP(&storages, "storage", "s", []string{}, "Storage backend(s) to backup to")
 	backupCmd.Flags().BoolVar(&runPrune, "prune", false, "Run prune after backup")
 	backupCmd.Flags().StringVar(&pruneOptions, "prune-options", "-keep 0:180 -keep 7:14 -keep 1:1 -a", "Prune retention options")
@@ -96,6 +98,7 @@ func runBackup(cmd *cobra.Command, args []string) error {
 		DockerContainer: dockerContainer,
 		SSHHost:         sshHost,
 		SSHPassword:     sshPassword,
+		RepoPath:        repoPath,
 	})
 
 	var allErrors []string

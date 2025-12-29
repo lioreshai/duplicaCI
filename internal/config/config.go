@@ -28,6 +28,7 @@ type DockerConfig struct {
 // RepositoryConfig defines a backup repository
 type RepositoryConfig struct {
 	ID           string   `yaml:"id"`
+	Path         string   `yaml:"path"` // Repository path (cd here before running duplicacy)
 	Storage      []string `yaml:"storage"`
 	Prune        bool     `yaml:"prune"`
 	PruneOptions string   `yaml:"prune_options"`

@@ -129,6 +129,65 @@ func TestIntegration_DuplicacyCheck(t *testing.T) {
 	}
 }
 
+func TestIntegration_DuplicacyPrune(t *testing.T) {
+	_, _, container, repoPath, storage, _ := getIntegrationConfig(t)
+
+	if storage == "" {
+		t.Skip("INTEGRATION_STORAGE required")
+	}
+
+	exec := New(Options{
+		DockerContainer: container,
+		RepoPath:        repoPath,
+		Verbose:         true,
+	})
+
+	// Run prune with same options as production
+	err := exec.RunDuplicacy("prune", "-storage", storage, "-keep", "0:180", "-keep", "7:14", "-keep", "1:1", "-a")
+	if err != nil {
+		t.Fatalf("duplicacy prune failed: %v", err)
+	}
+}
+
+func TestIntegration_FullWorkflow(t *testing.T) {
+	_, _, container, repoPath, storage, _ := getIntegrationConfig(t)
+
+	if storage == "" {
+		t.Skip("INTEGRATION_STORAGE required")
+	}
+
+	exec := New(Options{
+		DockerContainer: container,
+		RepoPath:        repoPath,
+		Verbose:         true,
+	})
+
+	// Full workflow: backup → check → prune (per duplicacy best practice)
+	t.Log("Step 1: Running backup...")
+	err := exec.RunDuplicacy("backup", "-storage", storage)
+	if err != nil {
+		// Exit code 100 = nothing to backup, acceptable
+		if !strings.Contains(err.Error(), "code 100") {
+			t.Fatalf("backup failed: %v", err)
+		}
+		t.Log("backup returned 'nothing to backup' (exit 100) - acceptable")
+	}
+
+	t.Log("Step 2: Running check...")
+	err = exec.RunDuplicacy("check", "-storage", storage)
+	if err != nil {
+		t.Fatalf("check failed: %v", err)
+	}
+
+	t.Log("Step 3: Running prune...")
+	err = exec.RunDuplicacy("prune", "-storage", storage, "-keep", "0:180", "-keep", "7:14", "-keep", "1:1", "-a")
+	if err != nil {
+		t.Fatalf("prune failed: %v", err)
+	}
+
+	t.Log("Full workflow completed successfully")
+}
+
 func TestIntegration_CommandBuilding_LocalDirect(t *testing.T) {
 	exec := New(Options{
 		Verbose: true,
