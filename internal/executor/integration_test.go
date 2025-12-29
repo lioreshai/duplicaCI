@@ -125,7 +125,7 @@ func TestIntegration_CommandBuilding_LocalDirect(t *testing.T) {
 	})
 
 	// Verify command is built correctly for local direct execution
-	cmd := exec.buildCommand([]string{"list", "-storage", "test"})
+	cmd := exec.buildCommand("duplicacy", []string{"list", "-storage", "test"})
 
 	// Should just be duplicacy command
 	if !strings.HasPrefix(cmd, "duplicacy list -storage test") {
@@ -148,13 +148,19 @@ func TestIntegration_CommandBuilding_Docker(t *testing.T) {
 		t.Skip("INTEGRATION_DOCKER_CONTAINER required for Docker test")
 	}
 
+	// Use the discovered path or default
+	binPath := duplicacyPath
+	if binPath == "" {
+		binPath = "duplicacy"
+	}
+
 	exec := New(Options{
 		DockerContainer: container,
 		DuplicacyPath:   duplicacyPath,
 		Verbose:         true,
 	})
 
-	cmd := exec.buildCommand([]string{"list", "-storage", "test"})
+	cmd := exec.buildCommand(binPath, []string{"list", "-storage", "test"})
 
 	if !strings.Contains(cmd, "docker exec "+container) {
 		t.Errorf("command should contain docker exec, got: %s", cmd)
@@ -168,6 +174,12 @@ func TestIntegration_CommandBuilding_SSH(t *testing.T) {
 		t.Skip("SSH tests require INTEGRATION_SSH_HOST and INTEGRATION_SSH_PASSWORD")
 	}
 
+	// Use the discovered path or default
+	binPath := duplicacyPath
+	if binPath == "" {
+		binPath = "duplicacy"
+	}
+
 	exec := New(Options{
 		SSHHost:         host,
 		SSHPassword:     password,
@@ -176,7 +188,7 @@ func TestIntegration_CommandBuilding_SSH(t *testing.T) {
 		Verbose:         true,
 	})
 
-	cmd := exec.buildCommand([]string{"list", "-storage", "test"})
+	cmd := exec.buildCommand(binPath, []string{"list", "-storage", "test"})
 
 	if !strings.Contains(cmd, "sshpass") {
 		t.Errorf("command should contain sshpass, got: %s", cmd)

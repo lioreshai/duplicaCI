@@ -7,7 +7,7 @@ import (
 func TestBuildCommand_Basic(t *testing.T) {
 	exec := New(Options{})
 
-	cmd := exec.buildCommand([]string{"backup", "-storage", "gdrive"})
+	cmd := exec.buildCommand("duplicacy", []string{"backup", "-storage", "gdrive"})
 	expected := "duplicacy backup -storage gdrive"
 
 	if cmd != expected {
@@ -20,7 +20,7 @@ func TestBuildCommand_WithDocker(t *testing.T) {
 		DockerContainer: "Duplicacy",
 	})
 
-	cmd := exec.buildCommand([]string{"backup", "-storage", "gdrive"})
+	cmd := exec.buildCommand("duplicacy", []string{"backup", "-storage", "gdrive"})
 	expected := "docker exec Duplicacy duplicacy backup -storage gdrive"
 
 	if cmd != expected {
@@ -33,7 +33,7 @@ func TestBuildCommand_WithSSH(t *testing.T) {
 		SSHHost: "root@192.168.1.100",
 	})
 
-	cmd := exec.buildCommand([]string{"backup", "-storage", "gdrive"})
+	cmd := exec.buildCommand("duplicacy", []string{"backup", "-storage", "gdrive"})
 	expected := "ssh -o StrictHostKeyChecking=no -o LogLevel=ERROR root@192.168.1.100 'duplicacy backup -storage gdrive'"
 
 	if cmd != expected {
@@ -47,7 +47,7 @@ func TestBuildCommand_WithSSHAndPassword(t *testing.T) {
 		SSHPassword: "secret123",
 	})
 
-	cmd := exec.buildCommand([]string{"backup"})
+	cmd := exec.buildCommand("duplicacy", []string{"backup"})
 	expected := "sshpass -p 'secret123' ssh -o StrictHostKeyChecking=no -o LogLevel=ERROR root@192.168.1.100 'duplicacy backup'"
 
 	if cmd != expected {
@@ -62,7 +62,7 @@ func TestBuildCommand_WithDockerAndSSH(t *testing.T) {
 		SSHPassword:     "secret123",
 	})
 
-	cmd := exec.buildCommand([]string{"backup", "-storage", "gdrive"})
+	cmd := exec.buildCommand("duplicacy", []string{"backup", "-storage", "gdrive"})
 	expected := "sshpass -p 'secret123' ssh -o StrictHostKeyChecking=no -o LogLevel=ERROR root@192.168.1.100 'docker exec Duplicacy duplicacy backup -storage gdrive'"
 
 	if cmd != expected {
@@ -76,7 +76,7 @@ func TestBuildCommand_EscapesSingleQuotes(t *testing.T) {
 		SSHPassword: "pass'word",
 	})
 
-	cmd := exec.buildCommand([]string{"backup"})
+	cmd := exec.buildCommand("duplicacy", []string{"backup"})
 
 	// Password with single quote should be escaped
 	if cmd == "" {
@@ -87,6 +87,20 @@ func TestBuildCommand_EscapesSingleQuotes(t *testing.T) {
 	expectedPasswordPart := "'pass'\"'\"'word'"
 	if !contains(cmd, expectedPasswordPart) {
 		t.Errorf("expected password to be escaped, got %q", cmd)
+	}
+}
+
+func TestBuildCommand_WithCustomPath(t *testing.T) {
+	exec := New(Options{
+		DockerContainer: "Duplicacy",
+	})
+
+	// Test with a custom duplicacy path (like in Docker containers)
+	cmd := exec.buildCommand("/config/bin/duplicacy_linux_x64_3.2.5", []string{"backup"})
+	expected := "docker exec Duplicacy /config/bin/duplicacy_linux_x64_3.2.5 backup"
+
+	if cmd != expected {
+		t.Errorf("expected %q, got %q", expected, cmd)
 	}
 }
 

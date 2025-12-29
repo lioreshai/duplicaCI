@@ -9,7 +9,7 @@ on:
 
 env:
   # Use same image as production (saspus/duplicacy-web:latest)
-  # Duplicacy CLI is at /usr/bin/duplicacy
+  # The web UI downloads the CLI to /config/bin/ on first startup
   DUPLICACY_IMAGE: saspus/duplicacy-web:latest
 
 jobs:
@@ -44,6 +44,7 @@ jobs:
           fi
 
       - name: Create test Duplicacy environment
+        id: setup
         env:
           CONTAINER_NAME: ${{ steps.container.outputs.name }}
         run: |
@@ -70,25 +71,43 @@ jobs:
             -v ${TEST_DIR}/config:/config \
             ${DUPLICACY_IMAGE}
 
-          # Wait for container
-          sleep 3
-          docker ps
+          # Wait for web UI to download CLI (checks /config/bin/ for duplicacy binary)
+          echo "Waiting for duplicacy_web to download CLI..."
+          for i in {1..60}; do
+            CLI_PATH=$(docker exec "${CONTAINER_NAME}" sh -c 'ls /config/bin/duplicacy_linux_x64_* 2>/dev/null | head -1' || true)
+            if [ -n "$CLI_PATH" ]; then
+              echo "CLI downloaded: $CLI_PATH"
+              break
+            fi
+            echo "Waiting... ($i/60)"
+            sleep 2
+          done
 
-          # Initialize duplicacy repository (use full path - not in default PATH)
-          docker exec "${CONTAINER_NAME}" sh -c "cd /repo && /usr/bin/duplicacy init test-repo /storage"
+          if [ -z "$CLI_PATH" ]; then
+            echo "ERROR: CLI not downloaded after 2 minutes"
+            docker logs "${CONTAINER_NAME}"
+            exit 1
+          fi
+
+          # Verify CLI works
+          docker exec "${CONTAINER_NAME}" "$CLI_PATH" -version
+
+          # Initialize duplicacy repository
+          docker exec "${CONTAINER_NAME}" sh -c "cd /repo && $CLI_PATH init test-repo /storage"
 
           # Verify
-          docker exec "${CONTAINER_NAME}" sh -c "cd /repo && /usr/bin/duplicacy list"
+          docker exec "${CONTAINER_NAME}" sh -c "cd /repo && $CLI_PATH list"
 
-          # Save for later steps
+          # Save paths for later steps
           echo "TEST_DIR=${TEST_DIR}" >> $GITHUB_ENV
+          echo "duplicacy_path=${CLI_PATH}" >> $GITHUB_OUTPUT
 
       - name: Run integration tests
         env:
           INTEGRATION_DOCKER_CONTAINER: ${{ steps.container.outputs.name }}
           INTEGRATION_REPO_PATH: /repo
           INTEGRATION_STORAGE: default
-          INTEGRATION_DUPLICACY_PATH: /usr/bin/duplicacy
+          # INTEGRATION_DUPLICACY_PATH is auto-discovered by the executor
         run: |
           go test -tags=integration -v ./internal/executor/ -timeout 5m
 

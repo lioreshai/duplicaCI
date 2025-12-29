@@ -1,10 +1,12 @@
 package executor
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
 )
 
 // Options configures the executor
@@ -14,12 +16,15 @@ type Options struct {
 	DockerContainer string
 	SSHHost         string
 	SSHPassword     string
-	DuplicacyPath   string // Path to duplicacy binary (default: "duplicacy")
+	DuplicacyPath   string // Path to duplicacy binary (default: auto-discover)
 }
 
 // Executor runs duplicacy commands
 type Executor struct {
-	opts Options
+	opts            Options
+	discoveredPath  string
+	discoverOnce    sync.Once
+	discoverErr     error
 }
 
 // New creates a new Executor
@@ -27,10 +32,78 @@ func New(opts Options) *Executor {
 	return &Executor{opts: opts}
 }
 
+// discoverDuplicacyPath finds the duplicacy CLI binary in a Docker container
+// The web UI downloads it to /config/bin/duplicacy_linux_x64_<version>
+func (e *Executor) discoverDuplicacyPath() (string, error) {
+	e.discoverOnce.Do(func() {
+		// If explicit path provided, use it
+		if e.opts.DuplicacyPath != "" {
+			e.discoveredPath = e.opts.DuplicacyPath
+			return
+		}
+
+		// If not using Docker, default to "duplicacy" in PATH
+		if e.opts.DockerContainer == "" {
+			e.discoveredPath = "duplicacy"
+			return
+		}
+
+		// In dry-run mode, don't try to discover - use default
+		if e.opts.DryRun {
+			e.discoveredPath = "duplicacy"
+			return
+		}
+
+		// Search for CLI in Docker container
+		searchCmd := fmt.Sprintf("docker exec %s sh -c 'ls /config/bin/duplicacy_linux_x64_* 2>/dev/null | head -1'",
+			e.opts.DockerContainer)
+
+		// Wrap in SSH if needed
+		if e.opts.SSHHost != "" {
+			escapedCmd := strings.ReplaceAll(searchCmd, "'", "'\"'\"'")
+			searchCmd = fmt.Sprintf("ssh -o StrictHostKeyChecking=no -o LogLevel=ERROR %s '%s'", e.opts.SSHHost, escapedCmd)
+			if e.opts.SSHPassword != "" {
+				searchCmd = fmt.Sprintf("sshpass -p '%s' %s",
+					strings.ReplaceAll(e.opts.SSHPassword, "'", "'\"'\"'"),
+					searchCmd)
+			}
+		}
+
+		cmd := exec.Command("bash", "-c", searchCmd)
+		var out bytes.Buffer
+		cmd.Stdout = &out
+		cmd.Stderr = os.Stderr
+
+		if err := cmd.Run(); err != nil {
+			e.discoverErr = fmt.Errorf("failed to discover duplicacy path: %w", err)
+			return
+		}
+
+		path := strings.TrimSpace(out.String())
+		if path == "" {
+			e.discoverErr = fmt.Errorf("duplicacy CLI not found in /config/bin/")
+			return
+		}
+
+		e.discoveredPath = path
+		if e.opts.Verbose {
+			fmt.Printf("    Discovered duplicacy at: %s\n", path)
+		}
+	})
+
+	return e.discoveredPath, e.discoverErr
+}
+
 // RunDuplicacy executes a duplicacy command with the given arguments
 func (e *Executor) RunDuplicacy(args ...string) error {
+	// Discover duplicacy path first (cached after first call)
+	duplicacyBin, err := e.discoverDuplicacyPath()
+	if err != nil {
+		return fmt.Errorf("cannot find duplicacy: %w", err)
+	}
+
 	// Build the full command
-	cmdStr := e.buildCommand(args)
+	cmdStr := e.buildCommand(duplicacyBin, args)
 
 	if e.opts.Verbose || e.opts.DryRun {
 		fmt.Printf("    Command: %s\n", cmdStr)
@@ -45,12 +118,7 @@ func (e *Executor) RunDuplicacy(args ...string) error {
 }
 
 // buildCommand constructs the full command string
-func (e *Executor) buildCommand(args []string) string {
-	// Base duplicacy command (use custom path if specified)
-	duplicacyBin := e.opts.DuplicacyPath
-	if duplicacyBin == "" {
-		duplicacyBin = "duplicacy"
-	}
+func (e *Executor) buildCommand(duplicacyBin string, args []string) string {
 	duplicacyCmd := duplicacyBin + " " + strings.Join(args, " ")
 
 	// Wrap in docker exec if container specified
