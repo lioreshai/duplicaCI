@@ -1,0 +1,33 @@
+name: Integration Tests
+
+on:
+  workflow_dispatch:  # Manual trigger only - these tests hit real infrastructure
+  schedule:
+    # Run weekly on Sundays at 2:00 AM EST (07:00 UTC)
+    - cron: '0 7 * * 0'
+
+jobs:
+  integration:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+          cache: false
+
+      - name: Install sshpass
+        run: sudo apt-get update && sudo apt-get install -y sshpass
+
+      - name: Run integration tests
+        env:
+          INTEGRATION_SSH_HOST: root@10.30.200.1
+          INTEGRATION_SSH_PASSWORD: ${{ secrets.MGMT_PASSWORD }}
+          INTEGRATION_DOCKER_CONTAINER: Duplicacy
+          INTEGRATION_REPO_PATH: /mnt/mikrotik_backups
+          INTEGRATION_STORAGE: GenizaNAS
+        run: |
+          go test -tags=integration -v ./internal/executor/ -timeout 5m
