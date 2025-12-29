@@ -7,9 +7,6 @@ on:
     branches: [main]
   workflow_dispatch:
 
-env:
-  DUPLICACY_IMAGE: saspus/duplicacy-web:mini
-
 jobs:
   integration:
     runs-on: ubuntu-latest
@@ -23,53 +20,49 @@ jobs:
           go-version: '1.21'
           cache: false
 
-      - name: Set container name
-        id: container
+      - name: Set test environment name
+        id: env
         run: |
-          CONTAINER_NAME="duplicacy-test-${GITHUB_SHA::8}"
-          echo "name=${CONTAINER_NAME}" >> $GITHUB_OUTPUT
-          echo "Container name: ${CONTAINER_NAME}"
+          ENV_NAME="duplicacy-test-${GITHUB_SHA::8}"
+          echo "name=${ENV_NAME}" >> $GITHUB_OUTPUT
+          echo "Test environment: ${ENV_NAME}"
 
-      - name: Create test Duplicacy environment
+      - name: Install Duplicacy CLI
+        run: |
+          # Download latest duplicacy CLI
+          curl -L -o /tmp/duplicacy https://github.com/gilbertchen/duplicacy/releases/download/v3.2.3/duplicacy_linux_x64_3.2.3
+          chmod +x /tmp/duplicacy
+          sudo mv /tmp/duplicacy /usr/local/bin/duplicacy
+          duplicacy -version
+
+      - name: Create test environment
         env:
-          CONTAINER_NAME: ${{ steps.container.outputs.name }}
+          ENV_NAME: ${{ steps.env.outputs.name }}
         run: |
-          # Create test directories
-          mkdir -p /tmp/duplicacy-test/repo
-          mkdir -p /tmp/duplicacy-test/storage
-          mkdir -p /tmp/duplicacy-test/config
+          # Create test directories with unique name
+          TEST_DIR="/tmp/${ENV_NAME}"
+          mkdir -p ${TEST_DIR}/repo
+          mkdir -p ${TEST_DIR}/storage
 
-          # Create some test files to backup
-          echo "test file 1" > /tmp/duplicacy-test/repo/file1.txt
-          echo "test file 2" > /tmp/duplicacy-test/repo/file2.txt
-          mkdir -p /tmp/duplicacy-test/repo/subdir
-          echo "test file 3" > /tmp/duplicacy-test/repo/subdir/file3.txt
+          # Create test files
+          echo "test file 1" > ${TEST_DIR}/repo/file1.txt
+          echo "test file 2" > ${TEST_DIR}/repo/file2.txt
+          mkdir -p ${TEST_DIR}/repo/subdir
+          echo "test file 3" > ${TEST_DIR}/repo/subdir/file3.txt
 
-          # Pull Duplicacy image
-          docker pull ${DUPLICACY_IMAGE}
+          # Initialize duplicacy repository
+          cd ${TEST_DIR}/repo
+          duplicacy init test-repo ${TEST_DIR}/storage
 
-          # Start Duplicacy container with unique name
-          docker run -d \
-            --name ${CONTAINER_NAME} \
-            -v /tmp/duplicacy-test/repo:/repo \
-            -v /tmp/duplicacy-test/storage:/storage \
-            -v /tmp/duplicacy-test/config:/config \
-            ${DUPLICACY_IMAGE}
+          # Verify
+          duplicacy list
 
-          # Wait for container to start
-          sleep 3
-          docker ps
-
-          # Initialize a duplicacy repository inside the container
-          docker exec ${CONTAINER_NAME} sh -c "cd /repo && duplicacy init test-repo /storage"
-
-          # Verify initialization
-          docker exec ${CONTAINER_NAME} sh -c "cd /repo && duplicacy list"
+          # Save path for later steps
+          echo "TEST_DIR=${TEST_DIR}" >> $GITHUB_ENV
 
       - name: Run integration tests
         env:
-          INTEGRATION_DOCKER_CONTAINER: ${{ steps.container.outputs.name }}
-          INTEGRATION_REPO_PATH: /repo
+          INTEGRATION_REPO_PATH: ${{ env.TEST_DIR }}/repo
           INTEGRATION_STORAGE: default
         run: |
           go test -tags=integration -v ./internal/executor/ -timeout 5m
@@ -77,24 +70,15 @@ jobs:
       - name: Cleanup
         if: always()
         env:
-          CONTAINER_NAME: ${{ steps.container.outputs.name }}
+          ENV_NAME: ${{ steps.env.outputs.name }}
         run: |
-          # Stop and remove container with volumes
-          docker stop ${CONTAINER_NAME} 2>/dev/null || true
-          docker rm -v ${CONTAINER_NAME} 2>/dev/null || true
+          # Remove test directory
+          rm -rf /tmp/${ENV_NAME}
 
-          # Remove the pulled image
-          docker rmi ${DUPLICACY_IMAGE} 2>/dev/null || true
+          # Remove duplicacy binary
+          sudo rm -f /usr/local/bin/duplicacy
 
-          # Remove all test data
-          rm -rf /tmp/duplicacy-test
-
-          # Prune any dangling images/volumes
-          docker image prune -f 2>/dev/null || true
-          docker volume prune -f 2>/dev/null || true
-
-          # Verify nothing remains
+          # Verify cleanup
           echo "Verifying cleanup..."
-          [ ! -d /tmp/duplicacy-test ] && echo "✓ Test directory removed"
-          ! docker ps -a --format '{{.Names}}' | grep -q "${CONTAINER_NAME}" && echo "✓ Container removed"
-          ! docker images --format '{{.Repository}}:{{.Tag}}' | grep -q "${DUPLICACY_IMAGE}" && echo "✓ Image removed"
+          [ ! -d /tmp/${ENV_NAME} ] && echo "✓ Test directory removed"
+          [ ! -f /usr/local/bin/duplicacy ] && echo "✓ Duplicacy binary removed"
