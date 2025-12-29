@@ -17,6 +17,7 @@ type Options struct {
 	SSHHost         string
 	SSHPassword     string
 	DuplicacyPath   string // Path to duplicacy binary (default: auto-discover)
+	RepoPath        string // Repository path to cd into before running duplicacy
 }
 
 // Executor runs duplicacy commands
@@ -121,9 +122,20 @@ func (e *Executor) RunDuplicacy(args ...string) error {
 func (e *Executor) buildCommand(duplicacyBin string, args []string) string {
 	duplicacyCmd := duplicacyBin + " " + strings.Join(args, " ")
 
+	// If repo path specified, cd to it first
+	if e.opts.RepoPath != "" {
+		duplicacyCmd = fmt.Sprintf("cd %s && %s", e.opts.RepoPath, duplicacyCmd)
+	}
+
 	// Wrap in docker exec if container specified
 	if e.opts.DockerContainer != "" {
-		duplicacyCmd = fmt.Sprintf("docker exec %s %s", e.opts.DockerContainer, duplicacyCmd)
+		if e.opts.RepoPath != "" {
+			// Need sh -c to handle cd && command
+			duplicacyCmd = fmt.Sprintf("docker exec %s sh -c '%s'", e.opts.DockerContainer, duplicacyCmd)
+		} else {
+			// Simple command, no shell needed
+			duplicacyCmd = fmt.Sprintf("docker exec %s %s", e.opts.DockerContainer, duplicacyCmd)
+		}
 	}
 
 	// Wrap in SSH if host specified

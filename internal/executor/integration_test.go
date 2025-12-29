@@ -54,7 +54,7 @@ func TestIntegration_DuplicacyVersion(t *testing.T) {
 }
 
 func TestIntegration_DuplicacyList(t *testing.T) {
-	_, _, container, repoPath, storage, duplicacyPath := getIntegrationConfig(t)
+	_, _, container, repoPath, storage, _ := getIntegrationConfig(t)
 
 	if storage == "" {
 		t.Skip("INTEGRATION_STORAGE required")
@@ -62,19 +62,19 @@ func TestIntegration_DuplicacyList(t *testing.T) {
 
 	exec := New(Options{
 		DockerContainer: container, // empty if not using Docker
-		DuplicacyPath:   duplicacyPath,
+		RepoPath:        repoPath,
 		Verbose:         true,
 	})
 
 	// Run duplicacy list - this is a read-only command
-	err := exec.RunDuplicacy("-d", repoPath, "list", "-storage", storage)
+	err := exec.RunDuplicacy("list", "-storage", storage)
 	if err != nil {
 		t.Fatalf("duplicacy list failed: %v", err)
 	}
 }
 
 func TestIntegration_DuplicacyBackupAndList(t *testing.T) {
-	_, _, container, repoPath, storage, duplicacyPath := getIntegrationConfig(t)
+	_, _, container, repoPath, storage, _ := getIntegrationConfig(t)
 
 	if storage == "" {
 		t.Skip("INTEGRATION_STORAGE required")
@@ -82,25 +82,25 @@ func TestIntegration_DuplicacyBackupAndList(t *testing.T) {
 
 	exec := New(Options{
 		DockerContainer: container,
-		DuplicacyPath:   duplicacyPath,
+		RepoPath:        repoPath,
 		Verbose:         true,
 	})
 
 	// Run a backup
-	err := exec.RunDuplicacy("-d", repoPath, "backup", "-storage", storage)
+	err := exec.RunDuplicacy("backup", "-storage", storage)
 	if err != nil {
 		t.Fatalf("duplicacy backup failed: %v", err)
 	}
 
 	// Verify backup shows in list
-	err = exec.RunDuplicacy("-d", repoPath, "list", "-storage", storage)
+	err = exec.RunDuplicacy("list", "-storage", storage)
 	if err != nil {
 		t.Fatalf("duplicacy list after backup failed: %v", err)
 	}
 }
 
 func TestIntegration_DuplicacyCheck(t *testing.T) {
-	_, _, container, repoPath, storage, duplicacyPath := getIntegrationConfig(t)
+	_, _, container, repoPath, storage, _ := getIntegrationConfig(t)
 
 	if storage == "" {
 		t.Skip("INTEGRATION_STORAGE required")
@@ -108,12 +108,12 @@ func TestIntegration_DuplicacyCheck(t *testing.T) {
 
 	exec := New(Options{
 		DockerContainer: container,
-		DuplicacyPath:   duplicacyPath,
+		RepoPath:        repoPath,
 		Verbose:         true,
 	})
 
 	// Run check - read-only verification
-	err := exec.RunDuplicacy("-d", repoPath, "check", "-storage", storage)
+	err := exec.RunDuplicacy("check", "-storage", storage)
 	if err != nil {
 		t.Fatalf("duplicacy check failed: %v", err)
 	}
