@@ -16,6 +16,7 @@ var (
 	repository      string
 	repoPath        string
 	storages        []string
+	backupOptions   string
 	runPrune        bool
 	pruneOptions    string
 	runCheck        bool
@@ -44,6 +45,7 @@ func init() {
 	backupCmd.Flags().StringVarP(&repository, "repository", "r", "", "Repository ID to backup")
 	backupCmd.Flags().StringVarP(&repoPath, "repo-path", "p", "", "Path to repository (cd here before running duplicacy)")
 	backupCmd.Flags().StringSliceVarP(&storages, "storage", "s", []string{}, "Storage backend(s) to backup to")
+	backupCmd.Flags().StringVar(&backupOptions, "backup-options", "", "Additional backup options (e.g., '-threads 4')")
 	backupCmd.Flags().BoolVar(&runPrune, "prune", false, "Run prune after backup")
 	backupCmd.Flags().StringVar(&pruneOptions, "prune-options", "-keep 0:180 -keep 7:14 -keep 1:1 -a", "Prune retention options")
 	backupCmd.Flags().BoolVar(&runCheck, "check", false, "Run check after backup")
@@ -107,7 +109,12 @@ func runBackup(cmd *cobra.Command, args []string) error {
 	for _, storage := range storages {
 		fmt.Printf("==> Backing up repository '%s' to storage '%s'\n", repository, storage)
 
-		err := exec.RunDuplicacy("backup", "-storage", storage)
+		backupArgs := []string{"backup", "-storage", storage}
+		if backupOptions != "" {
+			backupArgs = append(backupArgs, strings.Fields(backupOptions)...)
+		}
+
+		err := exec.RunDuplicacy(backupArgs...)
 		if err != nil {
 			errMsg := fmt.Sprintf("backup to %s failed: %v", storage, err)
 			allErrors = append(allErrors, errMsg)

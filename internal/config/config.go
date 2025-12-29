@@ -27,12 +27,13 @@ type DockerConfig struct {
 
 // RepositoryConfig defines a backup repository
 type RepositoryConfig struct {
-	ID           string   `yaml:"id"`
-	Path         string   `yaml:"path"` // Repository path (cd here before running duplicacy)
-	Storage      []string `yaml:"storage"`
-	Prune        bool     `yaml:"prune"`
-	PruneOptions string   `yaml:"prune_options"`
-	Check        bool     `yaml:"check"`
+	ID            string   `yaml:"id"`
+	Path          string   `yaml:"path"` // Repository path (cd here before running duplicacy)
+	Storage       []string `yaml:"storage"`
+	BackupOptions string   `yaml:"backup_options"` // e.g., "-threads 4"
+	Prune         bool     `yaml:"prune"`
+	PruneOptions  string   `yaml:"prune_options"`
+	Check         bool     `yaml:"check"`
 }
 
 // NotificationConfig holds notification settings
