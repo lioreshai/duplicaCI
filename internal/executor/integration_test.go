@@ -109,6 +109,30 @@ func TestIntegration_DuplicacyBackupAndList(t *testing.T) {
 	}
 }
 
+func TestIntegration_DuplicacyBackupWithOptions(t *testing.T) {
+	_, _, container, repoPath, storage, _ := getIntegrationConfig(t)
+
+	if storage == "" {
+		t.Skip("INTEGRATION_STORAGE required")
+	}
+
+	exec := New(Options{
+		DockerContainer: container,
+		RepoPath:        repoPath,
+		Verbose:         true,
+	})
+
+	// Run backup with -threads 4 (same as production)
+	err := exec.RunDuplicacy("backup", "-storage", storage, "-threads", "4")
+	if err != nil {
+		// Exit code 100 = nothing to backup, which is acceptable
+		if !strings.Contains(err.Error(), "code 100") {
+			t.Fatalf("duplicacy backup with -threads failed: %v", err)
+		}
+		t.Log("backup with -threads returned 'nothing to backup' (exit 100) - acceptable")
+	}
+}
+
 func TestIntegration_DuplicacyCheck(t *testing.T) {
 	_, _, container, repoPath, storage, _ := getIntegrationConfig(t)
 
