@@ -5,29 +5,12 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  workflow_dispatch:
+
+env:
+  DUPLICACY_IMAGE: saspus/duplicacy-web:latest
 
 jobs:
-  test:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: '1.21'
-          cache: false
-
-      - name: Download dependencies
-        run: go mod download
-
-      - name: Build
-        run: go build -v ./...
-
-      - name: Test
-        run: go test -v ./...
-
   lint:
     runs-on: ubuntu-latest
     steps:
@@ -50,3 +33,155 @@ jobs:
 
       - name: Vet
         run: go vet ./...
+
+  test:
+    needs: lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+          cache: false
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Build
+        run: go build -v ./...
+
+      - name: Test
+        run: go test -v ./...
+
+  integration:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+          cache: false
+
+      - name: Generate unique container name
+        id: container
+        run: |
+          # CRITICAL: Use prefix that can NEVER match production names
+          # Production uses: Duplicacy, Forgejo, Trilium, etc.
+          # We use: ci-duplicacy-test-{random}
+          CONTAINER_NAME="ci-duplicacy-test-${GITHUB_SHA::8}-$(date +%s)"
+          echo "name=${CONTAINER_NAME}" >> $GITHUB_OUTPUT
+          echo "Container name: ${CONTAINER_NAME}"
+
+          # Verify it doesn't match any known production names
+          if [[ "$CONTAINER_NAME" == "Duplicacy" ]] || \
+             [[ "$CONTAINER_NAME" == "Forgejo" ]] || \
+             [[ "$CONTAINER_NAME" == "Trilium" ]]; then
+            echo "ERROR: Container name matches production!"
+            exit 1
+          fi
+
+      - name: Create test Duplicacy environment
+        id: setup
+        env:
+          CONTAINER_NAME: ${{ steps.container.outputs.name }}
+        run: |
+          # Create test directories
+          TEST_DIR="/tmp/${CONTAINER_NAME}"
+          mkdir -p ${TEST_DIR}/repo
+          mkdir -p ${TEST_DIR}/storage
+          mkdir -p ${TEST_DIR}/config
+
+          # Create test files
+          echo "test file 1" > ${TEST_DIR}/repo/file1.txt
+          echo "test file 2" > ${TEST_DIR}/repo/file2.txt
+          mkdir -p ${TEST_DIR}/repo/subdir
+          echo "test file 3" > ${TEST_DIR}/repo/subdir/file3.txt
+
+          # Pull image
+          docker pull ${DUPLICACY_IMAGE}
+
+          # Start container with UNIQUE name
+          docker run -d \
+            --name "${CONTAINER_NAME}" \
+            -v ${TEST_DIR}/repo:/repo \
+            -v ${TEST_DIR}/storage:/storage \
+            -v ${TEST_DIR}/config:/config \
+            ${DUPLICACY_IMAGE}
+
+          # Wait for web UI to download CLI (checks /config/bin/ for duplicacy binary)
+          echo "Waiting for duplicacy_web to download CLI..."
+          for i in {1..60}; do
+            CLI_PATH=$(docker exec "${CONTAINER_NAME}" sh -c 'ls /config/bin/duplicacy_linux_x64_* 2>/dev/null | head -1' || true)
+            if [ -n "$CLI_PATH" ]; then
+              echo "CLI downloaded: $CLI_PATH"
+              break
+            fi
+            echo "Waiting... ($i/60)"
+            sleep 2
+          done
+
+          if [ -z "$CLI_PATH" ]; then
+            echo "ERROR: CLI not downloaded after 2 minutes"
+            docker logs "${CONTAINER_NAME}"
+            exit 1
+          fi
+
+          # Verify CLI works (duplicacy uses -v for version, not -version)
+          docker exec "${CONTAINER_NAME}" "$CLI_PATH" | head -5
+
+          # Initialize duplicacy repository
+          docker exec "${CONTAINER_NAME}" sh -c "cd /repo && $CLI_PATH init test-repo /storage"
+
+          # Verify
+          docker exec "${CONTAINER_NAME}" sh -c "cd /repo && $CLI_PATH list"
+
+          # Save paths for later steps
+          echo "TEST_DIR=${TEST_DIR}" >> $GITHUB_ENV
+
+      - name: Run integration tests
+        env:
+          INTEGRATION_DOCKER_CONTAINER: ${{ steps.container.outputs.name }}
+          INTEGRATION_REPO_PATH: /repo
+          INTEGRATION_STORAGE: default
+        run: |
+          go test -tags=integration -v ./internal/executor/ -timeout 5m
+
+      - name: Cleanup
+        if: always()
+        env:
+          CONTAINER_NAME: ${{ steps.container.outputs.name }}
+        run: |
+          # CRITICAL: Only remove our specific test container
+          # NEVER use wildcards or patterns that could match production
+
+          if [ -n "${CONTAINER_NAME}" ] && [[ "${CONTAINER_NAME}" == ci-duplicacy-test-* ]]; then
+            echo "Cleaning up container: ${CONTAINER_NAME}"
+            docker stop "${CONTAINER_NAME}" 2>/dev/null || true
+            docker rm -v "${CONTAINER_NAME}" 2>/dev/null || true
+          else
+            echo "ERROR: Invalid container name, skipping cleanup for safety"
+            exit 1
+          fi
+
+          # Remove test directory
+          TEST_DIR="/tmp/${CONTAINER_NAME}"
+          if [ -n "${CONTAINER_NAME}" ] && [[ "${TEST_DIR}" == /tmp/ci-duplicacy-test-* ]]; then
+            rm -rf "${TEST_DIR}"
+          fi
+
+          # Remove pulled image
+          docker rmi ${DUPLICACY_IMAGE} 2>/dev/null || true
+
+          # Prune only dangling resources (safe)
+          docker image prune -f 2>/dev/null || true
+
+          # Verify cleanup
+          echo "Verifying cleanup..."
+          ! docker ps -a --format '{{.Names}}' | grep -q "^${CONTAINER_NAME}$" && echo "✓ Container removed"
