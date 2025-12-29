@@ -7,6 +7,11 @@ on:
     branches: [main]
   workflow_dispatch:
 
+env:
+  # Use same image as production (saspus/duplicacy-web:latest)
+  # Duplicacy CLI is at /usr/bin/duplicacy
+  DUPLICACY_IMAGE: saspus/duplicacy-web:latest
+
 jobs:
   integration:
     runs-on: ubuntu-latest
@@ -20,29 +25,33 @@ jobs:
           go-version: '1.21'
           cache: false
 
-      - name: Set test environment name
-        id: env
+      - name: Generate unique container name
+        id: container
         run: |
-          ENV_NAME="duplicacy-test-${GITHUB_SHA::8}"
-          echo "name=${ENV_NAME}" >> $GITHUB_OUTPUT
-          echo "Test environment: ${ENV_NAME}"
+          # CRITICAL: Use prefix that can NEVER match production names
+          # Production uses: Duplicacy, Forgejo, Trilium, etc.
+          # We use: ci-duplicacy-test-{random}
+          CONTAINER_NAME="ci-duplicacy-test-${GITHUB_SHA::8}-$(date +%s)"
+          echo "name=${CONTAINER_NAME}" >> $GITHUB_OUTPUT
+          echo "Container name: ${CONTAINER_NAME}"
 
-      - name: Install Duplicacy CLI
-        run: |
-          # Download latest duplicacy CLI
-          curl -L -o /tmp/duplicacy https://github.com/gilbertchen/duplicacy/releases/download/v3.2.3/duplicacy_linux_x64_3.2.3
-          chmod +x /tmp/duplicacy
-          sudo mv /tmp/duplicacy /usr/local/bin/duplicacy
-          duplicacy -version
+          # Verify it doesn't match any known production names
+          if [[ "$CONTAINER_NAME" == "Duplicacy" ]] || \
+             [[ "$CONTAINER_NAME" == "Forgejo" ]] || \
+             [[ "$CONTAINER_NAME" == "Trilium" ]]; then
+            echo "ERROR: Container name matches production!"
+            exit 1
+          fi
 
-      - name: Create test environment
+      - name: Create test Duplicacy environment
         env:
-          ENV_NAME: ${{ steps.env.outputs.name }}
+          CONTAINER_NAME: ${{ steps.container.outputs.name }}
         run: |
-          # Create test directories with unique name
-          TEST_DIR="/tmp/${ENV_NAME}"
+          # Create test directories
+          TEST_DIR="/tmp/${CONTAINER_NAME}"
           mkdir -p ${TEST_DIR}/repo
           mkdir -p ${TEST_DIR}/storage
+          mkdir -p ${TEST_DIR}/config
 
           # Create test files
           echo "test file 1" > ${TEST_DIR}/repo/file1.txt
@@ -50,19 +59,34 @@ jobs:
           mkdir -p ${TEST_DIR}/repo/subdir
           echo "test file 3" > ${TEST_DIR}/repo/subdir/file3.txt
 
+          # Pull image
+          docker pull ${DUPLICACY_IMAGE}
+
+          # Start container with UNIQUE name
+          docker run -d \
+            --name "${CONTAINER_NAME}" \
+            -v ${TEST_DIR}/repo:/repo \
+            -v ${TEST_DIR}/storage:/storage \
+            -v ${TEST_DIR}/config:/config \
+            ${DUPLICACY_IMAGE}
+
+          # Wait for container
+          sleep 3
+          docker ps
+
           # Initialize duplicacy repository
-          cd ${TEST_DIR}/repo
-          duplicacy init test-repo ${TEST_DIR}/storage
+          docker exec "${CONTAINER_NAME}" sh -c "cd /repo && duplicacy init test-repo /storage"
 
           # Verify
-          duplicacy list
+          docker exec "${CONTAINER_NAME}" sh -c "cd /repo && duplicacy list"
 
-          # Save path for later steps
+          # Save for later steps
           echo "TEST_DIR=${TEST_DIR}" >> $GITHUB_ENV
 
       - name: Run integration tests
         env:
-          INTEGRATION_REPO_PATH: ${{ env.TEST_DIR }}/repo
+          INTEGRATION_DOCKER_CONTAINER: ${{ steps.container.outputs.name }}
+          INTEGRATION_REPO_PATH: /repo
           INTEGRATION_STORAGE: default
         run: |
           go test -tags=integration -v ./internal/executor/ -timeout 5m
@@ -70,15 +94,32 @@ jobs:
       - name: Cleanup
         if: always()
         env:
-          ENV_NAME: ${{ steps.env.outputs.name }}
+          CONTAINER_NAME: ${{ steps.container.outputs.name }}
         run: |
-          # Remove test directory
-          rm -rf /tmp/${ENV_NAME}
+          # CRITICAL: Only remove our specific test container
+          # NEVER use wildcards or patterns that could match production
 
-          # Remove duplicacy binary
-          sudo rm -f /usr/local/bin/duplicacy
+          if [ -n "${CONTAINER_NAME}" ] && [[ "${CONTAINER_NAME}" == ci-duplicacy-test-* ]]; then
+            echo "Cleaning up container: ${CONTAINER_NAME}"
+            docker stop "${CONTAINER_NAME}" 2>/dev/null || true
+            docker rm -v "${CONTAINER_NAME}" 2>/dev/null || true
+          else
+            echo "ERROR: Invalid container name, skipping cleanup for safety"
+            exit 1
+          fi
+
+          # Remove test directory
+          TEST_DIR="/tmp/${CONTAINER_NAME}"
+          if [ -n "${CONTAINER_NAME}" ] && [[ "${TEST_DIR}" == /tmp/ci-duplicacy-test-* ]]; then
+            rm -rf "${TEST_DIR}"
+          fi
+
+          # Remove pulled image
+          docker rmi ${DUPLICACY_IMAGE} 2>/dev/null || true
+
+          # Prune only dangling resources (safe)
+          docker image prune -f 2>/dev/null || true
 
           # Verify cleanup
           echo "Verifying cleanup..."
-          [ ! -d /tmp/${ENV_NAME} ] && echo "✓ Test directory removed"
-          [ ! -f /usr/local/bin/duplicacy ] && echo "✓ Duplicacy binary removed"
+          ! docker ps -a --format '{{.Names}}' | grep -q "^${CONTAINER_NAME}$" && echo "✓ Container removed"
