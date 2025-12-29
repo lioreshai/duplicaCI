@@ -9,6 +9,46 @@ jobs:
   release:
     runs-on: ubuntu-latest
     steps:
+      - name: Wait for CI to pass
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          COMMIT_SHA=${GITHUB_SHA}
+          echo "Checking CI status for commit: $COMMIT_SHA"
+
+          # Wait up to 5 minutes for CI to complete
+          for i in {1..30}; do
+            # Get workflow runs for this commit
+            RUNS=$(curl -s \
+              "https://git.shai.network/api/v1/repos/${GITHUB_REPOSITORY}/actions/tasks" \
+              -H "Authorization: token ${GITHUB_TOKEN}")
+
+            # Check if lint, test, and integration all passed for this SHA
+            LINT_STATUS=$(echo "$RUNS" | jq -r ".workflow_runs[] | select(.head_sha == \"$COMMIT_SHA\" and .name == \"lint\") | .status + \":\" + (.conclusion // \"pending\")" | head -1)
+            TEST_STATUS=$(echo "$RUNS" | jq -r ".workflow_runs[] | select(.head_sha == \"$COMMIT_SHA\" and .name == \"test\") | .status + \":\" + (.conclusion // \"pending\")" | head -1)
+            INTEGRATION_STATUS=$(echo "$RUNS" | jq -r ".workflow_runs[] | select(.head_sha == \"$COMMIT_SHA\" and .name == \"integration\") | .status + \":\" + (.conclusion // \"pending\")" | head -1)
+
+            echo "Lint: $LINT_STATUS, Test: $TEST_STATUS, Integration: $INTEGRATION_STATUS"
+
+            # Check if all passed
+            if [[ "$LINT_STATUS" == *":success" ]] && [[ "$TEST_STATUS" == *":success" ]] && [[ "$INTEGRATION_STATUS" == *":success" ]]; then
+              echo "All CI checks passed!"
+              exit 0
+            fi
+
+            # Check for failures
+            if [[ "$LINT_STATUS" == *":failure" ]] || [[ "$TEST_STATUS" == *":failure" ]] || [[ "$INTEGRATION_STATUS" == *":failure" ]]; then
+              echo "CI failed! Aborting release."
+              exit 1
+            fi
+
+            echo "Waiting for CI... ($i/30)"
+            sleep 10
+          done
+
+          echo "Timeout waiting for CI"
+          exit 1
+
       - name: Checkout
         uses: actions/checkout@v4
         with:
