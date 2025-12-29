@@ -157,9 +157,13 @@ func (e *Executor) buildCommandWithStorage(duplicacyBin string, args []string, s
 
 			// Prepend password export if needed (inside the shell command to avoid escaping issues)
 			if password != "" {
-				// Escape single quotes in password for shell
-				escapedPw := strings.ReplaceAll(password, "'", "'\\''")
-				shellCmd = fmt.Sprintf("export DUPLICACY_PASSWORD='%s' && %s", escapedPw, shellCmd)
+				// Use double quotes and escape chars that are special inside double quotes
+				escapedPw := password
+				escapedPw = strings.ReplaceAll(escapedPw, "\\", "\\\\")
+				escapedPw = strings.ReplaceAll(escapedPw, "\"", "\\\"")
+				escapedPw = strings.ReplaceAll(escapedPw, "$", "\\$")
+				escapedPw = strings.ReplaceAll(escapedPw, "`", "\\`")
+				shellCmd = fmt.Sprintf("export DUPLICACY_PASSWORD=\"%s\" && %s", escapedPw, shellCmd)
 			}
 
 			duplicacyCmd = fmt.Sprintf("docker exec %s sh -c '%s'", e.opts.DockerContainer, shellCmd)
