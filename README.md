@@ -23,6 +23,16 @@ Duplicacy's Web GUI is excellent for interactive use (restores, browsing backups
 
 duplicaci bridges the gap: use it for automated backups while keeping the Web GUI for everything else.
 
+### Operation Order
+
+When using `--check` and `--prune` flags, operations run in this order (per Duplicacy best practices):
+
+1. **Backup** - Create new backup snapshot
+2. **Check** - Verify backup integrity
+3. **Prune** - Remove old snapshots according to retention policy
+
+This order ensures integrity is verified before any snapshots are deleted.
+
 ## Installation
 
 ```bash
@@ -127,9 +137,9 @@ duplicaci backup [flags]
 Flags:
       --repository string      Repository ID to backup
       --storage string         Storage backend name (can be specified multiple times)
-      --prune                  Run prune after backup
+      --prune                  Run prune after check
       --prune-options string   Prune options (default: "-keep 0:180 -keep 7:14 -keep 1:1 -a")
-      --check                  Run check after backup
+      --check                  Run check after backup (before prune)
       --docker-container string  Run inside Docker container
       --ssh-host string        SSH to host before running (user@host)
       --ssh-password string    SSH password (or use SSH_PASSWORD env var)

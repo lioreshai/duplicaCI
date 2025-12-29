@@ -114,7 +114,22 @@ func runBackup(cmd *cobra.Command, args []string) error {
 		fmt.Printf("    Backup to '%s' completed successfully\n", storage)
 	}
 
-	// Run prune if requested and backup succeeded
+	// Run check if requested (after backup, before prune)
+	// Per Duplicacy best practice: backup → check → prune
+	if runCheck && len(allErrors) == 0 {
+		for _, storage := range storages {
+			fmt.Printf("==> Checking storage '%s'\n", storage)
+
+			err := exec.RunDuplicacy("check", "-storage", storage)
+			if err != nil {
+				errMsg := fmt.Sprintf("check on %s failed: %v", storage, err)
+				allErrors = append(allErrors, errMsg)
+				fmt.Fprintf(os.Stderr, "ERROR: %s\n", errMsg)
+			}
+		}
+	}
+
+	// Run prune if requested and backup/check succeeded
 	if runPrune && len(allErrors) == 0 {
 		for _, storage := range storages {
 			fmt.Printf("==> Pruning storage '%s'\n", storage)
@@ -125,20 +140,6 @@ func runBackup(cmd *cobra.Command, args []string) error {
 			err := exec.RunDuplicacy(pruneArgs...)
 			if err != nil {
 				errMsg := fmt.Sprintf("prune on %s failed: %v", storage, err)
-				allErrors = append(allErrors, errMsg)
-				fmt.Fprintf(os.Stderr, "ERROR: %s\n", errMsg)
-			}
-		}
-	}
-
-	// Run check if requested
-	if runCheck && len(allErrors) == 0 {
-		for _, storage := range storages {
-			fmt.Printf("==> Checking storage '%s'\n", storage)
-
-			err := exec.RunDuplicacy("check", "-storage", storage)
-			if err != nil {
-				errMsg := fmt.Sprintf("check on %s failed: %v", storage, err)
 				allErrors = append(allErrors, errMsg)
 				fmt.Fprintf(os.Stderr, "ERROR: %s\n", errMsg)
 			}
