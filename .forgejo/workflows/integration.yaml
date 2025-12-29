@@ -75,6 +75,14 @@ jobs:
       - name: Cleanup
         if: always()
         run: |
-          docker stop Duplicacy || true
-          docker rm Duplicacy || true
-          rm -rf /tmp/duplicacy-test || true
+          # Stop and remove container
+          docker stop Duplicacy 2>/dev/null || true
+          docker rm -v Duplicacy 2>/dev/null || true
+
+          # Remove all test data
+          rm -rf /tmp/duplicacy-test
+
+          # Verify nothing remains
+          echo "Verifying cleanup..."
+          [ ! -d /tmp/duplicacy-test ] && echo "✓ Test directory removed"
+          ! docker ps -a --format '{{.Names}}' | grep -q Duplicacy && echo "✓ Container removed"
