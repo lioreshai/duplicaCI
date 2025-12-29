@@ -146,25 +146,26 @@ func (e *Executor) buildCommandWithStorage(duplicacyBin string, args []string, s
 		duplicacyCmd = fmt.Sprintf("cd %s && %s", workDir, duplicacyCmd)
 	}
 
-	// Build docker exec with optional environment variables
+	// Build docker exec command
 	if e.opts.DockerContainer != "" {
-		dockerEnv := ""
-
 		// Get the password for this storage (check per-storage first, then default)
 		password := e.getStoragePassword(storageName)
-		if password != "" {
-			// Pass the password via DUPLICACY_PASSWORD env var
-			// Use double quotes to avoid conflicts with the outer single-quote SSH escaping
-			escapedPw := strings.ReplaceAll(password, "\"", "\\\"")
-			dockerEnv = fmt.Sprintf("-e \"DUPLICACY_PASSWORD=%s\" ", escapedPw)
-		}
 
-		if workDir != "" {
-			// Need sh -c to handle cd && command
-			duplicacyCmd = fmt.Sprintf("docker exec %s%s sh -c '%s'", dockerEnv, e.opts.DockerContainer, duplicacyCmd)
+		if workDir != "" || password != "" {
+			// Need sh -c to handle cd and/or env var
+			shellCmd := duplicacyCmd
+
+			// Prepend password export if needed (inside the shell command to avoid escaping issues)
+			if password != "" {
+				// Escape single quotes in password for shell
+				escapedPw := strings.ReplaceAll(password, "'", "'\\''")
+				shellCmd = fmt.Sprintf("export DUPLICACY_PASSWORD='%s' && %s", escapedPw, shellCmd)
+			}
+
+			duplicacyCmd = fmt.Sprintf("docker exec %s sh -c '%s'", e.opts.DockerContainer, shellCmd)
 		} else {
 			// Simple command, no shell needed
-			duplicacyCmd = fmt.Sprintf("docker exec %s%s %s", dockerEnv, e.opts.DockerContainer, duplicacyCmd)
+			duplicacyCmd = fmt.Sprintf("docker exec %s %s", e.opts.DockerContainer, duplicacyCmd)
 		}
 	}
 
