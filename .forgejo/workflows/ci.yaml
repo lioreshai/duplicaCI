@@ -133,10 +133,7 @@ jobs:
             exit 1
           fi
 
-          # Verify CLI works (duplicacy uses -v for version, not -version)
-          docker exec "${CONTAINER_NAME}" "$CLI_PATH" | head -5
-
-          # Initialize duplicacy repository
+          # Initialize duplicacy repository (this also verifies CLI works)
           docker exec "${CONTAINER_NAME}" sh -c "cd /repo && $CLI_PATH init test-repo /storage"
 
           # Verify
