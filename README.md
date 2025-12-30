@@ -28,10 +28,6 @@ backups:
     destinations:
       - NASBackup
       - GoogleDrive
-    retention:
-      daily: 7
-      weekly: 4
-      monthly: 3
     threads: 4
 
   - name: router_configs
@@ -39,9 +35,20 @@ backups:
     destinations:
       - NASBackup
       - GoogleDrive
+
+# Retention per storage (recommended)
+# All repositories on the storage share the same retention policy
+storages:
+  NASBackup:
     retention:
       daily: 7
       weekly: 4
+      monthly: 3
+  GoogleDrive:
+    retention:
+      daily: 7
+      weekly: 4
+      monthly: 3
 
 # Optional: storages to prune/check but not backup to
 maintenance:
@@ -119,10 +126,35 @@ That's it. No complex shell scripts, no manual orchestration.
 | `path` | Source path to backup | - |
 | `cache_dir` | Duplicacy cache directory | (uses path) |
 | `destinations` | Storage backends list | (required) |
-| `retention.daily` | Number of daily backups to keep | 7 |
-| `retention.weekly` | Number of weekly backups to keep | 4 |
-| `retention.monthly` | Number of monthly backups to keep | 0 |
 | `threads` | Parallel upload threads | 1 |
+| `retention` | Per-backup retention (see below) | - |
+
+### storages (recommended)
+
+Define retention at the storage level. All repositories on the storage share the same retention policy, and pruning uses the `-a` flag for efficiency.
+
+```yaml
+storages:
+  NASBackup:
+    retention:
+      daily: 7
+      weekly: 4
+      monthly: 3
+```
+
+| Field | Description | Default |
+|-------|-------------|---------|
+| `retention.daily` | Daily backups to keep | 7 |
+| `retention.weekly` | Weekly backups to keep | 4 |
+| `retention.monthly` | Monthly backups to keep | 0 |
+
+### Retention: Storage vs Backup Level
+
+**Storage-level retention** (recommended): Define retention in `storages`. Prune runs once per storage with `-a` flag, applying the same policy to all repositories.
+
+**Backup-level retention**: Define retention in `backups[]`. Prune runs separately for each repository with `-id`, allowing different policies. More operations, longer runtime.
+
+If a storage has retention defined, it takes precedence. Otherwise, each backup's retention is used.
 
 ### maintenance
 

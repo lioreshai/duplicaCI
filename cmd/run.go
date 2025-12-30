@@ -134,7 +134,6 @@ func runAllBackups(cmd *cobra.Command, args []string) error {
 	fmt.Println("==========================================")
 
 	allStorages := cfg.AllStorages()
-	pruneOptions := cfg.GetPruneOptions()
 
 	// Use first backup's cache dir for prune/check, or empty if no backups
 	var maintenanceCacheDir string
@@ -157,19 +156,64 @@ func runAllBackups(cmd *cobra.Command, args []string) error {
 	})
 
 	for _, storage := range allStorages {
-		fmt.Printf("\n==> Pruning '%s'\n", storage)
+		// Check if storage has retention defined
+		if retention, ok := cfg.GetStorageRetention(storage); ok {
+			// Storage-level retention: prune all repositories with -a
+			fmt.Printf("\n==> Pruning '%s' (all repositories)\n", storage)
 
-		pruneArgs := []string{"prune", "-storage", storage}
-		pruneArgs = append(pruneArgs, strings.Fields(pruneOptions)...)
+			pruneArgs := []string{"prune", "-storage", storage}
+			pruneArgs = append(pruneArgs, strings.Fields(retention.ToPruneOptions())...)
 
-		err := maintenanceExec.RunDuplicacyWithStorage(storage, pruneArgs...)
-		if err != nil {
-			errMsg := fmt.Sprintf("prune %s: %v", storage, err)
-			allErrors = append(allErrors, errMsg)
-			fmt.Fprintf(os.Stderr, "    ERROR: %v\n", err)
-			continue
+			err := maintenanceExec.RunDuplicacyWithStorage(storage, pruneArgs...)
+			if err != nil {
+				errMsg := fmt.Sprintf("prune %s: %v", storage, err)
+				allErrors = append(allErrors, errMsg)
+				fmt.Fprintf(os.Stderr, "    ERROR: %v\n", err)
+			} else {
+				fmt.Printf("    OK\n")
+			}
+		} else {
+			// Per-backup retention: prune each repository separately with -id
+			backups := cfg.BackupsForStorage(storage)
+			if len(backups) == 0 {
+				// Maintenance-only storage with no backups targeting it
+				// Use default retention with -a
+				fmt.Printf("\n==> Pruning '%s' (maintenance, default retention)\n", storage)
+
+				defaultRetention := config.RetentionConfig{Daily: 7, Weekly: 4}
+				pruneArgs := []string{"prune", "-storage", storage}
+				pruneArgs = append(pruneArgs, strings.Fields(defaultRetention.ToPruneOptions())...)
+
+				err := maintenanceExec.RunDuplicacyWithStorage(storage, pruneArgs...)
+				if err != nil {
+					errMsg := fmt.Sprintf("prune %s: %v", storage, err)
+					allErrors = append(allErrors, errMsg)
+					fmt.Fprintf(os.Stderr, "    ERROR: %v\n", err)
+				} else {
+					fmt.Printf("    OK\n")
+				}
+			} else {
+				// Prune each backup's repository separately
+				for _, backupName := range backups {
+					fmt.Printf("\n==> Pruning '%s' (repository: %s)\n", storage, backupName)
+
+					retention := cfg.GetBackupRetention(backupName)
+					pruneArgs := []string{"prune", "-storage", storage, "-id", backupName}
+					// Remove -a from options since we're targeting specific repository
+					opts := retention.ToPruneOptionsWithoutAll()
+					pruneArgs = append(pruneArgs, strings.Fields(opts)...)
+
+					err := maintenanceExec.RunDuplicacyWithStorage(storage, pruneArgs...)
+					if err != nil {
+						errMsg := fmt.Sprintf("prune %s/%s: %v", storage, backupName, err)
+						allErrors = append(allErrors, errMsg)
+						fmt.Fprintf(os.Stderr, "    ERROR: %v\n", err)
+						continue
+					}
+					fmt.Printf("    OK\n")
+				}
+			}
 		}
-		fmt.Printf("    OK\n")
 	}
 
 	// Phase 3: Check all storages

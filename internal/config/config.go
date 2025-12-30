@@ -15,6 +15,9 @@ type Config struct {
 	// Backup definitions
 	Backups []BackupConfig `yaml:"backups"`
 
+	// Storage configurations (retention, etc.)
+	Storages map[string]StorageConfig `yaml:"storages"`
+
 	// Storages that only need maintenance (prune/check), not backup
 	Maintenance []string `yaml:"maintenance"`
 
@@ -25,6 +28,11 @@ type Config struct {
 	SSH          SSHConfig          `yaml:"ssh"`
 	Docker       DockerConfig       `yaml:"docker"`
 	Repositories []RepositoryConfig `yaml:"repositories"`
+}
+
+// StorageConfig defines per-storage settings
+type StorageConfig struct {
+	Retention RetentionConfig `yaml:"retention"` // Retention policy for this storage
 }
 
 // ConnectionConfig holds connection settings
@@ -56,8 +64,24 @@ type RetentionConfig struct {
 	Weeks int `yaml:"weeks"` // Keep weekly backups for N days
 }
 
-// ToPruneOptions converts retention config to duplicacy prune options
+// ToPruneOptions converts retention config to duplicacy prune options (with -a flag)
 func (r RetentionConfig) ToPruneOptions() string {
+	return r.toPruneOptions(true)
+}
+
+// ToPruneOptionsWithoutAll converts retention config to prune options without -a flag
+// Used when pruning specific repositories with -id
+func (r RetentionConfig) ToPruneOptionsWithoutAll() string {
+	return r.toPruneOptions(false)
+}
+
+// toPruneOptions is the internal implementation
+func (r RetentionConfig) toPruneOptions(includeAll bool) string {
+	allFlag := ""
+	if includeAll {
+		allFlag = " -a"
+	}
+
 	// Handle legacy format
 	if r.Days > 0 || r.Weeks > 0 {
 		days := r.Days
@@ -68,7 +92,7 @@ func (r RetentionConfig) ToPruneOptions() string {
 		if weeks == 0 {
 			weeks = 180
 		}
-		return fmt.Sprintf("-keep 0:%d -keep 7:%d -keep 1:1 -a", weeks, days)
+		return fmt.Sprintf("-keep 0:%d -keep 7:%d -keep 1:1%s", weeks, days, allFlag)
 	}
 
 	// New format: counts
@@ -92,9 +116,9 @@ func (r RetentionConfig) ToPruneOptions() string {
 	var opts string
 	if monthly > 0 {
 		monthlyEnd := weeklyEnd + (monthly * 30)
-		opts = fmt.Sprintf("-keep 0:%d -keep 30:%d -keep 7:%d -keep 1:1 -a", monthlyEnd, weeklyEnd, dailyEnd)
+		opts = fmt.Sprintf("-keep 0:%d -keep 30:%d -keep 7:%d -keep 1:1%s", monthlyEnd, weeklyEnd, dailyEnd, allFlag)
 	} else {
-		opts = fmt.Sprintf("-keep 0:%d -keep 7:%d -keep 1:1 -a", weeklyEnd, dailyEnd)
+		opts = fmt.Sprintf("-keep 0:%d -keep 7:%d -keep 1:1%s", weeklyEnd, dailyEnd, allFlag)
 	}
 
 	return opts
@@ -240,11 +264,42 @@ func (c *Config) AllStorages() []string {
 	return storages
 }
 
-// GetPruneOptions returns the prune options for all backups (uses first backup's retention)
-func (c *Config) GetPruneOptions() string {
-	if len(c.Backups) > 0 {
-		return c.Backups[0].Retention.ToPruneOptions()
+// GetStorageRetention returns the retention config for a storage, if defined
+func (c *Config) GetStorageRetention(storage string) (RetentionConfig, bool) {
+	if c.Storages != nil {
+		if sc, ok := c.Storages[storage]; ok {
+			return sc.Retention, true
+		}
 	}
-	// Default retention: 7 daily, 4 weekly
-	return RetentionConfig{Daily: 7, Weekly: 4}.ToPruneOptions()
+	return RetentionConfig{}, false
+}
+
+// GetBackupRetention returns the retention config for a specific backup
+func (c *Config) GetBackupRetention(backupName string) RetentionConfig {
+	for _, b := range c.Backups {
+		if b.Name == backupName {
+			return b.Retention
+		}
+	}
+	// Default retention
+	return RetentionConfig{Daily: 7, Weekly: 4}
+}
+
+// HasStorageLevelRetention checks if any storage has retention defined
+func (c *Config) HasStorageLevelRetention() bool {
+	return len(c.Storages) > 0
+}
+
+// BackupsForStorage returns all backup names that target a specific storage
+func (c *Config) BackupsForStorage(storage string) []string {
+	var backups []string
+	for _, b := range c.Backups {
+		for _, d := range b.Destinations {
+			if d == storage {
+				backups = append(backups, b.Name)
+				break
+			}
+		}
+	}
+	return backups
 }
