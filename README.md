@@ -29,8 +29,9 @@ backups:
       - NASBackup
       - GoogleDrive
     retention:
-      days: 14
-      weeks: 180
+      daily: 7
+      weekly: 4
+      monthly: 3
     threads: 4
 
   - name: router_configs
@@ -39,8 +40,8 @@ backups:
       - NASBackup
       - GoogleDrive
     retention:
-      days: 14
-      weeks: 180
+      daily: 7
+      weekly: 4
 
 # Optional: storages to prune/check but not backup to
 maintenance:
@@ -118,8 +119,9 @@ That's it. No complex shell scripts, no manual orchestration.
 | `path` | Source path to backup | - |
 | `cache_dir` | Duplicacy cache directory | (uses path) |
 | `destinations` | Storage backends list | (required) |
-| `retention.days` | Keep daily for N days | 14 |
-| `retention.weeks` | Keep weekly for N days | 180 |
+| `retention.daily` | Number of daily backups to keep | 7 |
+| `retention.weekly` | Number of weekly backups to keep | 4 |
+| `retention.monthly` | Number of monthly backups to keep | 0 |
 | `threads` | Parallel upload threads | 1 |
 
 ### maintenance

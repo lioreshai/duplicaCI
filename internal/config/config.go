@@ -46,28 +46,56 @@ type BackupConfig struct {
 
 // RetentionConfig defines backup retention policy
 type RetentionConfig struct {
-	Days   int `yaml:"days"`   // Keep daily backups for N days (default: 14)
-	Weeks  int `yaml:"weeks"`  // Keep weekly backups for N days (default: 180)
-	Months int `yaml:"months"` // Keep monthly backups for N days (default: 0, disabled)
+	// New format: specify counts
+	Daily   int `yaml:"daily"`   // Number of daily backups to keep (default: 7)
+	Weekly  int `yaml:"weekly"`  // Number of weekly backups to keep (default: 4)
+	Monthly int `yaml:"monthly"` // Number of monthly backups to keep (default: 0)
+
+	// Legacy format (deprecated)
+	Days  int `yaml:"days"`  // Keep daily backups for N days
+	Weeks int `yaml:"weeks"` // Keep weekly backups for N days
 }
 
 // ToPruneOptions converts retention config to duplicacy prune options
 func (r RetentionConfig) ToPruneOptions() string {
-	// Default values
-	days := r.Days
-	if days == 0 {
-		days = 14
-	}
-	weeks := r.Weeks
-	if weeks == 0 {
-		weeks = 180
+	// Handle legacy format
+	if r.Days > 0 || r.Weeks > 0 {
+		days := r.Days
+		if days == 0 {
+			days = 14
+		}
+		weeks := r.Weeks
+		if weeks == 0 {
+			weeks = 180
+		}
+		return fmt.Sprintf("-keep 0:%d -keep 7:%d -keep 1:1 -a", weeks, days)
 	}
 
-	// Build prune options: -keep <n>:<d> means keep n revisions per day for d days
-	// -keep 0:180 = delete all revisions older than 180 days
-	// -keep 7:14 = keep weekly (every 7 days) for 14 days
-	// -keep 1:1 = keep daily for 1 day
-	opts := fmt.Sprintf("-keep 0:%d -keep 7:%d -keep 1:1 -a", weeks, days)
+	// New format: counts
+	daily := r.Daily
+	if daily == 0 {
+		daily = 7
+	}
+	weekly := r.Weekly
+	if weekly == 0 {
+		weekly = 4
+	}
+	monthly := r.Monthly
+
+	// Calculate day boundaries
+	// Daily: days 1 to daily
+	// Weekly: days daily+1 to daily + (weekly * 7)
+	// Monthly: days weekly_end+1 to weekly_end + (monthly * 30)
+	dailyEnd := daily
+	weeklyEnd := dailyEnd + (weekly * 7)
+
+	var opts string
+	if monthly > 0 {
+		monthlyEnd := weeklyEnd + (monthly * 30)
+		opts = fmt.Sprintf("-keep 0:%d -keep 30:%d -keep 7:%d -keep 1:1 -a", monthlyEnd, weeklyEnd, dailyEnd)
+	} else {
+		opts = fmt.Sprintf("-keep 0:%d -keep 7:%d -keep 1:1 -a", weeklyEnd, dailyEnd)
+	}
 
 	return opts
 }
@@ -144,11 +172,15 @@ func (c *Config) applyDefaults() {
 
 	// Apply defaults to each backup
 	for i := range c.Backups {
-		if c.Backups[i].Retention.Days == 0 {
-			c.Backups[i].Retention.Days = 14
-		}
-		if c.Backups[i].Retention.Weeks == 0 {
-			c.Backups[i].Retention.Weeks = 180
+		// Only set new format defaults if legacy format not used
+		if c.Backups[i].Retention.Days == 0 && c.Backups[i].Retention.Weeks == 0 {
+			if c.Backups[i].Retention.Daily == 0 {
+				c.Backups[i].Retention.Daily = 7
+			}
+			if c.Backups[i].Retention.Weekly == 0 {
+				c.Backups[i].Retention.Weekly = 4
+			}
+			// Monthly defaults to 0 (disabled)
 		}
 		if c.Backups[i].Threads == 0 {
 			c.Backups[i].Threads = 1
@@ -213,6 +245,6 @@ func (c *Config) GetPruneOptions() string {
 	if len(c.Backups) > 0 {
 		return c.Backups[0].Retention.ToPruneOptions()
 	}
-	// Default retention
-	return RetentionConfig{Days: 14, Weeks: 180}.ToPruneOptions()
+	// Default retention: 7 daily, 4 weekly
+	return RetentionConfig{Daily: 7, Weekly: 4}.ToPruneOptions()
 }
