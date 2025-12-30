@@ -108,6 +108,9 @@ func runAllBackups(cmd *cobra.Command, args []string) error {
 			fmt.Printf("    -> %s\n", dest)
 
 			backupArgs := []string{"backup", "-storage", dest}
+			if !verbose {
+				backupArgs = append(backupArgs, "-quiet")
+			}
 			if backup.Threads > 1 {
 				backupArgs = append(backupArgs, "-threads", fmt.Sprintf("%d", backup.Threads))
 			}
