@@ -47,6 +47,13 @@ func TestIntegration_DuplicacyVersion(t *testing.T) {
 		t.Skip("Skipping local duplicacy test when using Docker")
 	}
 
+	// This test requires duplicacy to be installed locally
+	// Skip if not in a proper integration test environment
+	repoPath := os.Getenv("INTEGRATION_REPO_PATH")
+	if repoPath == "" {
+		t.Skip("INTEGRATION_REPO_PATH required for local duplicacy test")
+	}
+
 	exec := New(Options{
 		Verbose: true,
 	})
