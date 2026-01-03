@@ -127,6 +127,47 @@ func (e *Executor) RunDuplicacyWithStorage(storageName string, args ...string) e
 	return e.execute(cmdStr)
 }
 
+// RunDuplicacyCaptureWithStorage executes a duplicacy command and captures stdout
+// Returns the command output as a string instead of streaming to stdout
+func (e *Executor) RunDuplicacyCaptureWithStorage(storageName string, args ...string) (string, error) {
+	// Discover duplicacy path first (cached after first call)
+	duplicacyBin, err := e.discoverDuplicacyPath()
+	if err != nil {
+		return "", fmt.Errorf("cannot find duplicacy: %w", err)
+	}
+
+	// Build the full command with storage-specific password
+	cmdStr := e.buildCommandWithStorage(duplicacyBin, args, storageName)
+
+	if e.opts.Verbose || e.opts.DryRun {
+		fmt.Printf("    Command: %s\n", cmdStr)
+	}
+
+	if e.opts.DryRun {
+		return "", nil
+	}
+
+	// Execute the command and capture output
+	return e.executeCapture(cmdStr)
+}
+
+// executeCapture runs the command and captures stdout
+func (e *Executor) executeCapture(cmdStr string) (string, error) {
+	cmd := exec.Command("bash", "-c", cmdStr)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			return stdout.String(), fmt.Errorf("command exited with code %d: %s", exitErr.ExitCode(), stderr.String())
+		}
+		return stdout.String(), err
+	}
+
+	return stdout.String(), nil
+}
+
 // buildCommand constructs the full command string (for backward compatibility)
 func (e *Executor) buildCommand(duplicacyBin string, args []string) string {
 	return e.buildCommandWithStorage(duplicacyBin, args, "")

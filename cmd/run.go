@@ -8,6 +8,7 @@ import (
 	"github.com/lioreshai/duplicaci/internal/config"
 	"github.com/lioreshai/duplicaci/internal/executor"
 	"github.com/lioreshai/duplicaci/internal/notifier"
+	"github.com/lioreshai/duplicaci/internal/stats"
 	"github.com/spf13/cobra"
 )
 
@@ -221,10 +222,25 @@ func runAllBackups(cmd *cobra.Command, args []string) error {
 	fmt.Println("Phase 3: Check")
 	fmt.Println("==========================================")
 
+	// Create stats writer for updating Duplicacy Web UI stats
+	var statsWriter *stats.Writer
+	if cfg.Connection.Container != "" {
+		statsWriter = stats.NewWriter(cfg.Connection.Host, sshPassword, cfg.Connection.Container)
+		statsWriter.DryRun = dryRun
+		statsWriter.Verbose = verbose
+	}
+
 	for _, storage := range allStorages {
 		fmt.Printf("\n==> Checking '%s'\n", storage)
 
-		err := maintenanceExec.RunDuplicacyWithStorage(storage, "check", "-storage", storage)
+		// Run check with -tabular to get stats output
+		output, err := maintenanceExec.RunDuplicacyCaptureWithStorage(storage, "check", "-tabular", "-storage", storage)
+
+		// Print the output (since we captured it)
+		if output != "" {
+			fmt.Print(output)
+		}
+
 		if err != nil {
 			errMsg := fmt.Sprintf("check %s: %v", storage, err)
 			allErrors = append(allErrors, errMsg)
@@ -232,6 +248,29 @@ func runAllBackups(cmd *cobra.Command, args []string) error {
 			continue
 		}
 		fmt.Printf("    OK\n")
+
+		// Update stats for Duplicacy Web UI
+		if statsWriter != nil && output != "" {
+			dayStats, parseErr := stats.ParseCheckOutput(output)
+			if parseErr != nil {
+				fmt.Fprintf(os.Stderr, "    WARNING: failed to parse check output for stats: %v\n", parseErr)
+			} else {
+				// Print parsed stats summary for CI visibility
+				fmt.Printf("\n    Storage Stats Summary:\n")
+				fmt.Printf("      Total size: %s\n", stats.FormatBytes(dayStats.TotalSize))
+				fmt.Printf("      Total chunks: %d\n", dayStats.TotalChunks)
+				fmt.Printf("      Repositories: %d\n", len(dayStats.Repositories))
+				for repoName, repoStats := range dayStats.Repositories {
+					fmt.Printf("        - %s: %d revisions, %s\n", repoName, repoStats.Revisions, stats.FormatBytes(repoStats.TotalSize))
+				}
+
+				if writeErr := statsWriter.UpdateStorageStats(storage, dayStats); writeErr != nil {
+					fmt.Fprintf(os.Stderr, "    WARNING: failed to update stats: %v\n", writeErr)
+				} else {
+					fmt.Printf("    Updated Duplicacy Web UI stats for '%s'\n", storage)
+				}
+			}
+		}
 	}
 
 	// Summary
