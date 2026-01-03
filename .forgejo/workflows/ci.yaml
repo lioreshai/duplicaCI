@@ -1,0 +1,268 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags:
+      - 'v*'
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  DUPLICACY_IMAGE: saspus/duplicacy-web:latest
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+          cache: false
+
+      - name: Check formatting
+        run: |
+          if [ -n "$(gofmt -l .)" ]; then
+            echo "Code is not formatted. Run 'go fmt ./...'"
+            gofmt -d .
+            exit 1
+          fi
+
+      - name: Vet
+        run: go vet ./...
+
+  unit-tests:
+    name: Unit Tests
+    needs: lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+          cache: false
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Build
+        run: go build -v ./...
+
+      - name: Run unit tests
+        run: |
+          go test -v -race -coverprofile=coverage.out -covermode=atomic ./...
+          echo "Unit test coverage:"
+          go tool cover -func=coverage.out | tail -1
+
+  integration-tests:
+    name: Integration Tests
+    needs: unit-tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+          cache: false
+
+      - name: Generate unique container name
+        id: container
+        run: |
+          CONTAINER_NAME="ci-duplicacy-test-${GITHUB_SHA::8}-$(date +%s)"
+          echo "name=${CONTAINER_NAME}" >> $GITHUB_OUTPUT
+          echo "Container name: ${CONTAINER_NAME}"
+
+      - name: Create test Duplicacy environment
+        id: setup
+        env:
+          CONTAINER_NAME: ${{ steps.container.outputs.name }}
+        run: |
+          TEST_DIR="/tmp/${CONTAINER_NAME}"
+          mkdir -p ${TEST_DIR}/repo ${TEST_DIR}/storage ${TEST_DIR}/config
+
+          echo "test file 1" > ${TEST_DIR}/repo/file1.txt
+          echo "test file 2" > ${TEST_DIR}/repo/file2.txt
+          mkdir -p ${TEST_DIR}/repo/subdir
+          echo "test file 3" > ${TEST_DIR}/repo/subdir/file3.txt
+
+          docker pull ${DUPLICACY_IMAGE}
+
+          docker run -d \
+            --name "${CONTAINER_NAME}" \
+            -v ${TEST_DIR}/repo:/repo \
+            -v ${TEST_DIR}/storage:/storage \
+            -v ${TEST_DIR}/config:/config \
+            ${DUPLICACY_IMAGE}
+
+          echo "Waiting for duplicacy_web to download CLI..."
+          for i in {1..60}; do
+            CLI_PATH=$(docker exec "${CONTAINER_NAME}" sh -c 'ls /config/bin/duplicacy_linux_x64_* 2>/dev/null | head -1' || true)
+            if [ -n "$CLI_PATH" ]; then
+              echo "CLI downloaded: $CLI_PATH"
+              break
+            fi
+            echo "Waiting... ($i/60)"
+            sleep 2
+          done
+
+          if [ -z "$CLI_PATH" ]; then
+            echo "ERROR: CLI not downloaded after 2 minutes"
+            docker logs "${CONTAINER_NAME}"
+            exit 1
+          fi
+
+          docker exec "${CONTAINER_NAME}" sh -c "cd /repo && $CLI_PATH init test-repo /storage"
+          docker exec "${CONTAINER_NAME}" sh -c "cd /repo && $CLI_PATH list"
+
+          echo "TEST_DIR=${TEST_DIR}" >> $GITHUB_ENV
+
+      - name: Run integration tests
+        env:
+          INTEGRATION_DOCKER_CONTAINER: ${{ steps.container.outputs.name }}
+          INTEGRATION_REPO_PATH: /repo
+          INTEGRATION_STORAGE: default
+        run: |
+          # Run all tests (unit + integration) with coverage
+          go test -tags=integration -v -coverprofile=coverage.out -covermode=atomic ./... -timeout 5m
+
+          echo ""
+          echo "Combined test coverage (unit + integration):"
+          go tool cover -func=coverage.out | tail -5
+          go tool cover -func=coverage.out | tail -1
+
+      - name: Update coverage badge
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        run: |
+          # Extract coverage percentage from combined tests
+          COVERAGE=$(go tool cover -func=coverage.out | grep total | awk '{print $3}' | sed 's/%//')
+          echo "Combined Coverage: ${COVERAGE}%"
+
+          # Determine color based on coverage
+          COV_INT=${COVERAGE%.*}
+          if [ "$COV_INT" -lt 30 ]; then
+            COLOR="red"
+          elif [ "$COV_INT" -lt 70 ]; then
+            COLOR="yellow"
+          else
+            COLOR="brightgreen"
+          fi
+          echo "Color: $COLOR"
+
+          # Update badge in README
+          sed -i "s/Coverage-[0-9.]*%25-[a-z]*/Coverage-${COVERAGE}%25-${COLOR}/g" README.md
+
+          if git diff --quiet README.md; then
+            echo "No coverage change"
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add README.md
+            git commit -m "Update coverage badge to ${COVERAGE}%"
+            git push
+          fi
+
+      - name: Cleanup
+        if: always()
+        env:
+          CONTAINER_NAME: ${{ steps.container.outputs.name }}
+        run: |
+          if [ -n "${CONTAINER_NAME}" ] && [[ "${CONTAINER_NAME}" == ci-duplicacy-test-* ]]; then
+            echo "Cleaning up container: ${CONTAINER_NAME}"
+            docker stop "${CONTAINER_NAME}" 2>/dev/null || true
+            docker rm -v "${CONTAINER_NAME}" 2>/dev/null || true
+          else
+            echo "ERROR: Invalid container name, skipping cleanup for safety"
+            exit 1
+          fi
+
+          TEST_DIR="/tmp/${CONTAINER_NAME}"
+          if [ -n "${CONTAINER_NAME}" ] && [[ "${TEST_DIR}" == /tmp/ci-duplicacy-test-* ]]; then
+            rm -rf "${TEST_DIR}"
+          fi
+
+          docker rmi ${DUPLICACY_IMAGE} 2>/dev/null || true
+          docker image prune -f 2>/dev/null || true
+
+          echo "Verifying cleanup..."
+          ! docker ps -a --format '{{.Names}}' | grep -q "^${CONTAINER_NAME}$" && echo "Container removed"
+
+  release:
+    name: Release
+    needs: integration-tests
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+          cache: false
+
+      - name: Get version from tag
+        id: version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+      - name: Build binaries
+        run: |
+          VERSION=${{ steps.version.outputs.VERSION }}
+          COMMIT=$(git rev-parse --short HEAD)
+          DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          LDFLAGS="-X main.version=${VERSION} -X main.commit=${COMMIT} -X main.date=${DATE}"
+
+          GOOS=linux GOARCH=amd64 go build -ldflags "${LDFLAGS}" -o duplicaci_linux_amd64 .
+          GOOS=linux GOARCH=arm64 go build -ldflags "${LDFLAGS}" -o duplicaci_linux_arm64 .
+
+      - name: Create checksums
+        run: |
+          sha256sum duplicaci_* > checksums.txt
+          cat checksums.txt
+
+      - name: Create Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SERVER_URL: ${{ github.server_url }}
+        run: |
+          VERSION=${{ steps.version.outputs.VERSION }}
+
+          RELEASE_RESPONSE=$(curl -s -X POST \
+            "${SERVER_URL}/api/v1/repos/${GITHUB_REPOSITORY}/releases" \
+            -H "Authorization: token ${GITHUB_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d "{\"tag_name\": \"${VERSION}\", \"name\": \"${VERSION}\", \"body\": \"Release ${VERSION}\"}")
+
+          RELEASE_ID=$(echo "$RELEASE_RESPONSE" | jq -r '.id')
+          echo "Created release ID: $RELEASE_ID"
+
+          if [ "$RELEASE_ID" = "null" ] || [ -z "$RELEASE_ID" ]; then
+            echo "Failed to create release:"
+            echo "$RELEASE_RESPONSE"
+            exit 1
+          fi
+
+          for file in duplicaci_linux_amd64 duplicaci_linux_arm64 checksums.txt; do
+            echo "Uploading $file..."
+            curl -s -X POST \
+              "${SERVER_URL}/api/v1/repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}/assets?name=${file}" \
+              -H "Authorization: token ${GITHUB_TOKEN}" \
+              -H "Content-Type: application/octet-stream" \
+              --data-binary @${file}
+          done
+
+          echo "Release ${VERSION} created successfully"
