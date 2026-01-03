@@ -307,3 +307,92 @@ func TestIntegration_DryRunDoesNotExecute(t *testing.T) {
 		t.Errorf("dry run should not return error: %v", err)
 	}
 }
+
+func TestIntegration_DuplicacyCheckTabular(t *testing.T) {
+	_, _, container, repoPath, storage, _ := getIntegrationConfig(t)
+
+	if storage == "" {
+		t.Skip("INTEGRATION_STORAGE required")
+	}
+
+	exec := New(Options{
+		DockerContainer: container,
+		RepoPath:        repoPath,
+		Verbose:         true,
+	})
+
+	// Run check with -tabular flag to get stats output
+	output, err := exec.RunDuplicacyCaptureWithStorage(storage, "check", "-tabular", "-storage", storage)
+	if err != nil {
+		t.Fatalf("duplicacy check -tabular failed: %v", err)
+	}
+
+	// Verify we got some output
+	if output == "" {
+		t.Error("expected non-empty output from check -tabular")
+	}
+
+	// Log the output for debugging
+	t.Logf("Check output length: %d bytes", len(output))
+
+	// Verify output contains expected patterns
+	if !strings.Contains(output, "SNAPSHOT_CHECK") && !strings.Contains(output, "Storage set to") {
+		t.Error("output should contain SNAPSHOT_CHECK or Storage info")
+	}
+}
+
+func TestIntegration_CaptureVsStream(t *testing.T) {
+	_, _, container, repoPath, storage, _ := getIntegrationConfig(t)
+
+	if storage == "" {
+		t.Skip("INTEGRATION_STORAGE required")
+	}
+
+	exec := New(Options{
+		DockerContainer: container,
+		RepoPath:        repoPath,
+		Verbose:         true,
+	})
+
+	// Capture method should return the output
+	output, err := exec.RunDuplicacyCaptureWithStorage(storage, "list", "-storage", storage)
+	if err != nil {
+		t.Fatalf("RunDuplicacyCaptureWithStorage failed: %v", err)
+	}
+
+	t.Logf("Captured output: %d bytes", len(output))
+
+	// Stream method should not return output but not error
+	err = exec.RunDuplicacyWithStorage(storage, "list", "-storage", storage)
+	if err != nil {
+		t.Fatalf("RunDuplicacyWithStorage failed: %v", err)
+	}
+}
+
+func TestIntegration_FullCheckWithStatsWorkflow(t *testing.T) {
+	_, _, container, repoPath, storage, _ := getIntegrationConfig(t)
+
+	if storage == "" || container == "" {
+		t.Skip("INTEGRATION_STORAGE and INTEGRATION_DOCKER_CONTAINER required")
+	}
+
+	exec := New(Options{
+		DockerContainer: container,
+		RepoPath:        repoPath,
+		Verbose:         true,
+	})
+
+	// Run check with -tabular to get stats output (same as what run command does)
+	output, err := exec.RunDuplicacyCaptureWithStorage(storage, "check", "-tabular", "-storage", storage)
+	if err != nil {
+		t.Fatalf("check -tabular failed: %v", err)
+	}
+
+	// Verify we can see the output (for CI visibility)
+	t.Logf("Check output:\n%s", output)
+
+	// Verify output contains the tabular format markers
+	if !strings.Contains(output, "all") {
+		t.Log("Note: output does not contain 'all' summary row - may have no revisions")
+	}
+}
