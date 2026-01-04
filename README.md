@@ -1,4 +1,4 @@
-# duplicaci
+# duplicaCI
 
 [![Go Version](https://img.shields.io/badge/Go-1.19+-00ADD8?style=flat&logo=go)](https://go.dev/)
 [![Coverage](https://img.shields.io/badge/Coverage-96.6%25-brightgreen)](https://github.com/lioreshai/duplicaci)
@@ -8,7 +8,7 @@ CI/CD backup orchestration for [Duplicacy Web](https://duplicacy.com/).
 
 ## Overview
 
-**duplicaci** complements Duplicacy Web by enabling CI/CD-controlled backup scheduling while preserving full Web UI functionality for restores, monitoring, and configuration.
+**duplicaCI** complements Duplicacy Web by enabling CI/CD-controlled backup scheduling while preserving full Web UI functionality for restores, monitoring, and configuration.
 
 ```
 CI Runner → SSH → Docker Host → Duplicacy Web Container
@@ -85,7 +85,7 @@ jobs:
 
 ## Storage Compatibility
 
-Duplicaci works with all [Duplicacy storage backends](https://github.com/gilbertchen/duplicacy/wiki/Storage-Backends). Storage credentials (API keys, etc.) are configured in Duplicacy Web UI and stored in the container. Duplicaci only provides the encryption password at runtime.
+duplicaCI works with all [Duplicacy storage backends](https://github.com/gilbertchen/duplicacy/wiki/Storage-Backends). Storage credentials (API keys, etc.) are configured in Duplicacy Web UI and stored in the container. duplicaCI only provides the encryption password at runtime.
 
 | Storage Type | Status | Notes |
 |--------------|--------|-------|
@@ -103,11 +103,11 @@ Duplicaci works with all [Duplicacy storage backends](https://github.com/gilbert
 
 **Full support**: All operations work (backup, prune, check, stats).
 
-**Partial support**: Operations work if OAuth tokens are valid, but duplicaci cannot pass token paths to the CLI. Tokens may need periodic refresh via Web UI.
+**Partial support**: Operations work if OAuth tokens are valid, but duplicaCI cannot pass token paths to the CLI. Tokens may need periodic refresh via Web UI.
 
 ## CI/CD Compatibility
 
-Duplicaci is a standalone binary that can be triggered by any CI/CD system or scheduler.
+duplicaCI is a standalone binary that can be triggered by any CI/CD system or scheduler.
 
 ### Runners
 
@@ -123,7 +123,7 @@ Any system that can execute shell commands works:
 
 ### Failure Notifications
 
-On backup failure, duplicaci can create/update issues to alert operators.
+On backup failure, duplicaCI can create/update issues to alert operators.
 
 | Platform | Status | Notes |
 |----------|--------|-------|
@@ -210,7 +210,7 @@ duplicaci check --storage NAS --docker-container Duplicacy --ssh-host root@host
 
 Duplicacy Web remains fully functional:
 - **Restores** - Browse and restore any revision
-- **Monitoring** - Dashboard stats updated by duplicaci
+- **Monitoring** - Dashboard stats updated by duplicaCI
 - **Configuration** - Manage credentials and OAuth tokens
 
 After migrating to CI/CD, disable scheduled jobs in the Web GUI.
