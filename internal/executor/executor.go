@@ -275,3 +275,38 @@ func (e *Executor) execute(cmdStr string) error {
 
 	return nil
 }
+
+// RunContainerShell executes a shell command inside the Docker container
+// This is used for maintenance tasks like fixing permissions
+func (e *Executor) RunContainerShell(shellCmd string) error {
+	if e.opts.DockerContainer == "" {
+		return fmt.Errorf("no Docker container configured")
+	}
+
+	// Build docker exec command
+	cmdStr := fmt.Sprintf("docker exec %s sh -c '%s'",
+		e.opts.DockerContainer,
+		strings.ReplaceAll(shellCmd, "'", "'\"'\"'"))
+
+	// Wrap in SSH if host specified
+	if e.opts.SSHHost != "" {
+		escapedCmd := strings.ReplaceAll(cmdStr, "'", "'\"'\"'")
+		cmdStr = fmt.Sprintf("ssh -o StrictHostKeyChecking=no -o LogLevel=ERROR %s '%s'", e.opts.SSHHost, escapedCmd)
+
+		if e.opts.SSHPassword != "" {
+			cmdStr = fmt.Sprintf("sshpass -p '%s' %s",
+				strings.ReplaceAll(e.opts.SSHPassword, "'", "'\"'\"'"),
+				cmdStr)
+		}
+	}
+
+	if e.opts.Verbose || e.opts.DryRun {
+		fmt.Printf("    Command: %s\n", cmdStr)
+	}
+
+	if e.opts.DryRun {
+		return nil
+	}
+
+	return e.execute(cmdStr)
+}

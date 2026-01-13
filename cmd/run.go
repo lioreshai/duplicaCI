@@ -273,6 +273,23 @@ func runAllBackups(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// Phase 4: Fix permissions for Duplicacy Web UI access
+	// Duplicacy CLI creates directories with mode 744, which prevents the web UI
+	// (running as non-root user) from traversing them. Add execute bit for others.
+	fmt.Println("\n==========================================")
+	fmt.Println("Phase 4: Fix Permissions")
+	fmt.Println("==========================================")
+
+	fmt.Printf("\n==> Fixing storage directory permissions\n")
+	// Fix permissions on common local storage paths
+	// The web UI runs as 'duplicac' user and needs execute permission to traverse directories
+	permCmd := "find /backuproot -type d -exec chmod o+x {} \\; 2>/dev/null; true"
+	if err := maintenanceExec.RunContainerShell(permCmd); err != nil {
+		fmt.Fprintf(os.Stderr, "    WARNING: failed to fix permissions: %v\n", err)
+	} else {
+		fmt.Printf("    OK\n")
+	}
+
 	// Summary
 	fmt.Println("\n==========================================")
 	fmt.Println("Summary")
