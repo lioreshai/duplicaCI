@@ -1,7 +1,7 @@
 # duplicaCI
 
 [![Go Version](https://img.shields.io/badge/Go-1.19+-00ADD8?style=flat&logo=go)](https://go.dev/)
-[![Coverage](https://img.shields.io/badge/Coverage-93.4%25-brightgreen)](https://github.com/lioreshai/duplicaci)
+[![Coverage](https://img.shields.io/badge/Coverage-93.5%25-brightgreen)](https://github.com/lioreshai/duplicaci)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 CI/CD backup orchestration for [Duplicacy Web](https://duplicacy.com/).
