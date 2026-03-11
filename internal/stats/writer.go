@@ -83,27 +83,29 @@ func (w *Writer) writeStatsFile(path string, stats StorageStats) error {
 		return nil
 	}
 
-	// Escape the JSON for shell
-	escapedJSON := strings.ReplaceAll(string(data), "'", "'\"'\"'")
-
-	// Write via cat with heredoc-style input
-	cmd := w.buildDockerCommand(fmt.Sprintf("cat > %s << 'STATSEOF'\n%s\nSTATSEOF", path, escapedJSON))
+	// Pipe JSON via stdin to avoid ARG_MAX limits on large stats files
+	cmd := w.buildDockerCommand(fmt.Sprintf("cat > %s", path), true)
 
 	if w.Verbose {
 		fmt.Printf("    Writing stats: %s\n", path)
 	}
 
-	if err := w.execute(cmd); err != nil {
+	if err := w.executeWithStdin(cmd, data); err != nil {
 		return fmt.Errorf("failed to write stats file: %w", err)
 	}
 
 	return nil
 }
 
-// buildDockerCommand constructs a command to run inside the Docker container
-func (w *Writer) buildDockerCommand(shellCmd string) string {
+// buildDockerCommand constructs a command to run inside the Docker container.
+// If interactive is true, adds -i flag to docker exec for stdin passthrough.
+func (w *Writer) buildDockerCommand(shellCmd string, interactive ...bool) string {
 	// Escape the shell command for docker exec
-	dockerCmd := fmt.Sprintf("docker exec %s sh -c '%s'", w.DockerContainer, shellCmd)
+	interactiveFlag := ""
+	if len(interactive) > 0 && interactive[0] {
+		interactiveFlag = "-i "
+	}
+	dockerCmd := fmt.Sprintf("docker exec %s%s sh -c '%s'", interactiveFlag, w.DockerContainer, shellCmd)
 
 	// Wrap in SSH if host specified
 	if w.SSHHost != "" {
@@ -139,6 +141,16 @@ func (w *Writer) executeCapture(cmdStr string) (string, error) {
 // execute runs a command and streams output
 func (w *Writer) execute(cmdStr string) error {
 	cmd := exec.Command("bash", "-c", cmdStr)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	return cmd.Run()
+}
+
+// executeWithStdin runs a command with data piped to stdin
+func (w *Writer) executeWithStdin(cmdStr string, stdin []byte) error {
+	cmd := exec.Command("bash", "-c", cmdStr)
+	cmd.Stdin = bytes.NewReader(stdin)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
